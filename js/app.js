@@ -446,19 +446,19 @@ async function mediaPanel(panel, m, kind, ctx) {
 
   const ctrl = document.createElement("div");
   ctrl.className = "player-ctrl";
-  const speeds = [0.75, 1, 1.25, 1.5, 1.75, 2];
-  let speed = Number(localStorage.getItem("fp3-speed")) || 1;
-  ctrl.innerHTML = `<button class="btn" data-seek="-15">↺ 15秒</button><button class="btn" data-speed>${speed}倍</button><button class="btn" data-seek="15">15秒 ↻</button>`;
+  let speed = PL.P.speed;
+  ctrl.innerHTML = `<button class="btn" data-seek="-15">↺ 15秒</button>
+    <label class="speed-sel">速さ<select data-speed aria-label="再生速度">${PL.speedOptions(speed)}</select></label>
+    <button class="btn" data-seek="15">15秒 ↻</button>`;
   panel.appendChild(ctrl);
   ctrl.addEventListener("click", (e) => {
     const t = e.target;
     if (t.dataset.seek) el.currentTime = Math.max(0, el.currentTime + Number(t.dataset.seek));
-    if ("speed" in t.dataset) {
-      speed = speeds[(speeds.indexOf(speed) + 1) % speeds.length] || 1;
-      el.playbackRate = speed;
-      t.textContent = `${speed}倍`;
-      try { localStorage.setItem("fp3-speed", String(speed)); } catch (_) {}
-    }
+  });
+  ctrl.querySelector("[data-speed]").addEventListener("change", (e) => {
+    PL.setSpeed(e.target.value);
+    speed = PL.P.speed;
+    el.playbackRate = speed;
   });
 
   const label = kind === "audio" ? ["聞いた", "聞いたらチェック"] : ["見た", "見たらチェック"];
@@ -1012,7 +1012,7 @@ async function listenView(ctx) {
           <button class="icon" id="p-next" aria-label="次の音声">⏭</button>
         </div>
         <div class="extras">
-          <button class="btn small" id="p-speed">${P.speed}倍</button>
+          <label class="speed-sel">速さ<select id="p-speed" aria-label="再生速度">${PL.speedOptions(P.speed)}</select></label>
           ${
             PL.canSetVolume
               ? `<label class="vol">🔈<input type="range" id="vol" min="0" max="100" value="${Math.round(P.volume * 100)}" aria-label="音量">🔊</label>`
@@ -1082,7 +1082,7 @@ async function listenView(ctx) {
     view.querySelector("#p-next").addEventListener("click", () => PL.next());
     view.querySelector("#p-back").addEventListener("click", () => PL.skip(-15));
     view.querySelector("#p-fwd").addEventListener("click", () => PL.skip(15));
-    view.querySelector("#p-speed").addEventListener("click", () => PL.cycleSpeed());
+    view.querySelector("#p-speed").addEventListener("change", (e) => PL.setSpeed(e.target.value));
     const seekEl = view.querySelector("#seek");
     seekEl.addEventListener("input", () => {
       seeking = true;
