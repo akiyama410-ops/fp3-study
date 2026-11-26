@@ -1,6 +1,6 @@
 // 電波がなくてもアプリを開けるように、アプリ本体をこの端末に保存しておく仕組み。
 // アプリを更新したら VERSION の数字を上げてください。
-const VERSION = "v1";
+const VERSION = "v2";
 const CACHE = `fp3-app-${VERSION}`;
 const APP_FILES = [
   "./",
@@ -9,6 +9,7 @@ const APP_FILES = [
   "js/app.js",
   "js/config.js",
   "js/data.js",
+  "js/player.js",
   "js/stats.js",
   "js/store.js",
   "vendor/supabase.js",

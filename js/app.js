@@ -2,6 +2,7 @@
 import { FIELDS, KIND_LABEL, STORAGE_LIMIT, FILE_LIMIT } from "./config.js";
 import * as D from "./data.js";
 import * as S from "./stats.js";
+import * as PL from "./player.js";
 
 const { state } = D;
 const view = document.getElementById("view");
@@ -113,12 +114,14 @@ async function render() {
   else if (page === "record") current = recordView(b);
   else if (page === "plan") current = planView();
   else if (page === "admin") current = adminView(ctx);
+  else if (page === "listen") current = await listenView(ctx);
   else current = homeView();
 }
 
 function setActiveNav(page) {
-  const map = { home: "home", fields: "fields", field: "fields", m: "fields", quiz: "fields", record: "record", plan: "plan", admin: "admin" };
+  const map = { home: "home", fields: "fields", field: "fields", m: "fields", quiz: "fields", record: "record", plan: "plan", admin: "admin", listen: "listen" };
   for (const a of nav.querySelectorAll("a")) a.classList.toggle("active", a.dataset.nav === map[page]);
+  updateMini();
 }
 
 function updateSyncBadge() {
@@ -944,6 +947,207 @@ function adminView(ctx) {
   draw();
   return { live: false };
 }
+
+// ===== 聞き流し =====
+function fmtTime(sec) {
+  if (!isFinite(sec) || sec < 0) sec = 0;
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function sleepLabel() {
+  if (PL.P.sleepEnd) return "この音声が終わったら止まります";
+  if (PL.P.sleepAt) return `あと ${Math.max(1, Math.ceil((PL.P.sleepAt - Date.now()) / 60000))}分で止まります`;
+  return "";
+}
+
+async function listenView(ctx) {
+  const P = PL.P;
+  let localKeys = new Set(await D.localKeys());
+  if (!ctx.alive()) return null;
+  let scope = P.queue.length ? P.scope : P.scope || "all";
+
+  const draw = () => {
+    const playingId = PL.currentId();
+    const pm = playingId && state.materials.find((x) => x.id === playingId);
+    const scopeTracks = PL.tracksFor(scope);
+    const queue = P.queue.length ? P.queue : scopeTracks;
+    const showingCurrent = P.queue.length && P.scope === scope;
+    const list = showingCurrent ? P.queue : scopeTracks;
+    view.innerHTML = `
+      <section class="card">
+        <h1>🎧 聞き流し</h1>
+        <div class="scope">
+          <button class="pill ${scope === "all" ? "on" : ""}" data-scope="all">すべて（${PL.tracksFor("all").length}）</button>
+          ${FIELDS.map((f) => `<button class="pill ${scope === f.key ? "on" : ""}" data-scope="${f.key}"><span class="dot" style="background:${f.color}"></span>${esc(f.short)}（${PL.tracksFor(f.key).length}）</button>`).join("")}
+        </div>
+        <div class="opts">
+          <button class="pill ${P.shuffle ? "on" : ""}" id="o-shuffle">🔀 ランダム</button>
+          <button class="pill ${P.repeat ? "on" : ""}" id="o-repeat">🔁 くり返し</button>
+          <label class="sleep">🌙 スリープ
+            <select id="o-sleep">
+              <option value="">なし</option>
+              <option value="15">15分</option><option value="30">30分</option><option value="45">45分</option><option value="60">60分</option><option value="90">90分</option>
+              <option value="end">この音声の終わりまで</option>
+            </select>
+          </label>
+        </div>
+        <button class="btn primary wide" id="start">▶ ${scope === "all" ? "すべて" : esc(fieldInfo(scope).name)}を${P.shuffle ? "ランダムに" : "順番に"}再生</button>
+        ${scopeTracks.length ? "" : `<p class="note">この範囲には、まだ音声がアップロードされていません。パソコンの「管理」からアップロードできます。</p>`}
+      </section>
+
+      <section class="card player ${pm ? "" : "idle"}">
+        <div class="now">
+          <div class="muted small">${pm ? `${esc(fieldInfo(pm.field).name)} ・ ${P.index + 1} / ${queue.length}${P.shuffle ? " ・ ランダム" : ""}` : "停止中"}</div>
+          <div class="now-title">${pm ? esc(pm.title) : "下の一覧から選ぶか、上の再生ボタンを押してください"}</div>
+        </div>
+        <input type="range" id="seek" min="0" max="1000" value="0" ${pm ? "" : "disabled"} aria-label="再生位置">
+        <div class="times"><span id="t-cur">0:00</span><span id="t-dur">0:00</span></div>
+        <div class="transport">
+          <button class="icon" id="p-prev" aria-label="前の音声">⏮</button>
+          <button class="icon" id="p-back" aria-label="15秒戻る">↺<small>15</small></button>
+          <button class="icon big" id="p-play" aria-label="再生・一時停止">${PL.isPlaying() ? "⏸" : "▶"}</button>
+          <button class="icon" id="p-fwd" aria-label="15秒進む">↻<small>15</small></button>
+          <button class="icon" id="p-next" aria-label="次の音声">⏭</button>
+        </div>
+        <div class="extras">
+          <button class="btn small" id="p-speed">${P.speed}倍</button>
+          ${
+            PL.canSetVolume
+              ? `<label class="vol">🔈<input type="range" id="vol" min="0" max="100" value="${Math.round(P.volume * 100)}" aria-label="音量">🔊</label>`
+              : `<span class="note">音量はiPhoneの横のボタンで調整してください</span>`
+          }
+        </div>
+        <p class="note" id="sleep-note">${esc(sleepLabel())}</p>
+        ${P.error ? `<p class="note err">${esc(P.error)}</p>` : ""}
+        ${P.loading ? `<p class="note">読み込み中…</p>` : ""}
+      </section>
+
+      <section class="card">
+        <h2>${showingCurrent ? "再生リスト" : "この範囲の音声"}</h2>
+        <ol class="tracks">
+          ${list
+            .map((id, i) => {
+              const m = state.materials.find((x) => x.id === id);
+              if (!m) return "";
+              const heard = D.getProgress(id, "audio").done;
+              const saved = localKeys.has(`${id}:audio`);
+              return `<li class="${id === playingId ? "playing" : ""}"><button class="track" data-i="${i}" data-id="${esc(id)}">
+                <span class="dot" style="background:${fieldInfo(m.field).color}"></span>
+                <span class="grow">${esc(m.title)}</span>
+                <span class="marks">${saved ? "📱" : ""}${heard ? `<span class="ok">✓</span>` : ""}</span>
+              </button></li>`;
+            })
+            .join("")}
+        </ol>
+        <p class="note">✓ は聞いた音声、📱 はこの端末に保存済み（電波なしで聞ける）の音声です。</p>
+      </section>`;
+
+    const sleepSel = view.querySelector("#o-sleep");
+    sleepSel.value = P.sleepAt || P.sleepEnd ? P.sleepChoice : "";
+    bind();
+    tick();
+  };
+
+  const tick = () => {
+    const a = P.audio;
+    const cur = view.querySelector("#t-cur");
+    if (!cur) return;
+    cur.textContent = fmtTime(a.currentTime);
+    view.querySelector("#t-dur").textContent = fmtTime(a.duration);
+    const seekEl = view.querySelector("#seek");
+    if (!seeking && a.duration) seekEl.value = String(Math.round((a.currentTime / a.duration) * 1000));
+    view.querySelector("#sleep-note").textContent = sleepLabel();
+  };
+
+  let seeking = false;
+  const bind = () => {
+    view.querySelectorAll("[data-scope]").forEach((b) =>
+      b.addEventListener("click", () => {
+        scope = b.dataset.scope;
+        draw();
+      }),
+    );
+    view.querySelector("#o-shuffle").addEventListener("click", () => PL.setShuffle(!PL.P.shuffle));
+    view.querySelector("#o-repeat").addEventListener("click", () => PL.setRepeat(!PL.P.repeat));
+    view.querySelector("#o-sleep").addEventListener("change", (e) => {
+      const v = e.target.value;
+      PL.setSleep(v === "" ? null : v === "end" ? "end" : Number(v));
+      toast(v === "" ? "スリープタイマーを止めました" : "スリープタイマーをセットしました");
+    });
+    view.querySelector("#start").addEventListener("click", () => PL.start(scope));
+    view.querySelector("#p-play").addEventListener("click", () => (PL.currentId() ? PL.toggle() : PL.start(scope)));
+    view.querySelector("#p-prev").addEventListener("click", () => PL.prev());
+    view.querySelector("#p-next").addEventListener("click", () => PL.next());
+    view.querySelector("#p-back").addEventListener("click", () => PL.skip(-15));
+    view.querySelector("#p-fwd").addEventListener("click", () => PL.skip(15));
+    view.querySelector("#p-speed").addEventListener("click", () => PL.cycleSpeed());
+    const seekEl = view.querySelector("#seek");
+    seekEl.addEventListener("input", () => {
+      seeking = true;
+      const a = P.audio;
+      if (a.duration) view.querySelector("#t-cur").textContent = fmtTime((seekEl.value / 1000) * a.duration);
+    });
+    seekEl.addEventListener("change", () => {
+      seeking = false;
+      if (P.audio.duration) PL.seek((seekEl.value / 1000) * P.audio.duration);
+    });
+    const vol = view.querySelector("#vol");
+    if (vol) vol.addEventListener("input", () => PL.setVolume(vol.value / 100));
+    view.querySelectorAll(".track").forEach((b) =>
+      b.addEventListener("click", () => {
+        if (P.queue.length && P.scope === scope) PL.playAt(Number(b.dataset.i));
+        else PL.start(scope, b.dataset.id);
+      }),
+    );
+  };
+
+  const off = PL.onPlayer((kind) => {
+    if (!ctx.alive()) return;
+    if (kind === "tick") tick();
+    else draw();
+  });
+  const offData = D.onChange(async () => {
+    localKeys = new Set(await D.localKeys());
+    if (ctx.alive()) draw();
+  });
+  draw();
+  return {
+    live: false,
+    cleanup() {
+      off();
+      offData();
+    },
+  };
+}
+
+// 聞き流し中に、ほかの画面の下に出す小さなプレイヤー
+const mini = document.getElementById("mini");
+function updateMini() {
+  const id = PL.currentId();
+  const onListen = parseRoute()[0] === "listen";
+  if (!id || !state.user || onListen) {
+    mini.hidden = true;
+    document.body.classList.remove("has-mini");
+    return;
+  }
+  const m = state.materials.find((x) => x.id === id);
+  mini.hidden = false;
+  document.body.classList.add("has-mini");
+  mini.innerHTML = `<a href="#/listen" class="mini-title">🎧 ${esc(m ? m.title : "")}</a>
+    <button class="icon" data-mini="play" aria-label="再生・一時停止">${PL.isPlaying() ? "⏸" : "▶"}</button>
+    <button class="icon" data-mini="next" aria-label="次の音声">⏭</button>`;
+}
+mini.addEventListener("click", (e) => {
+  const act = e.target.closest("[data-mini]");
+  if (!act) return;
+  if (act.dataset.mini === "play") PL.toggle();
+  else PL.next();
+});
+PL.onPlayer((kind) => {
+  if (kind !== "tick") updateMini();
+});
 
 // ===== 起動 =====
 (async () => {

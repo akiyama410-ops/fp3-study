@@ -198,3 +198,47 @@ video.video { width: 100%; border-radius: 10px; background: #000; }
 .steps { padding-left: 1.2em; font-size: 0.9rem; }
 .steps li { margin-bottom: 8px; }
 textarea { resize: vertical; }
+
+/* ===== 聞き流し ===== */
+.tabbar a { font-size: 0.65rem; }
+.scope, .opts { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+.pill {
+  display: inline-flex; align-items: center; gap: 4px; min-height: 38px; padding: 4px 12px;
+  border-radius: 99px; border: 1px solid var(--line); background: var(--card); color: var(--text);
+  font: inherit; font-size: 0.85rem; cursor: pointer;
+}
+.pill.on { background: var(--primary); color: var(--primary-text); border-color: var(--primary); font-weight: 700; }
+.pill.on .dot { box-shadow: 0 0 0 2px #fff; }
+.sleep { display: inline-flex; align-items: center; gap: 6px; margin: 0; color: var(--text); font-size: 0.85rem; }
+.sleep select { width: auto; min-height: 38px; margin: 0; padding: 4px 8px; }
+.btn.wide { width: 100%; }
+.player.idle .transport, .player.idle .times { opacity: 0.5; }
+.now-title { font-weight: 700; font-size: 1.05rem; margin: 2px 0 8px; }
+.small { font-size: 0.8rem; }
+.player input[type="range"] { padding: 0; min-height: 28px; accent-color: var(--primary); background: none; border: 0; }
+.times { display: flex; justify-content: space-between; font-size: 0.8rem; color: var(--muted); }
+.transport { display: flex; justify-content: space-between; align-items: center; margin: 8px 0; }
+.icon {
+  width: 52px; height: 52px; border-radius: 50%; border: 1px solid var(--line); background: var(--card);
+  color: var(--text); font-size: 1.3rem; cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+}
+.icon small { font-size: 0.6rem; margin-left: 1px; }
+.icon.big { width: 68px; height: 68px; font-size: 1.8rem; background: var(--primary); color: var(--primary-text); border-color: var(--primary); }
+.extras { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.vol { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 180px; margin: 0; color: var(--text); }
+.vol input { flex: 1; margin: 0; }
+.note.err { color: var(--ng); }
+.tracks { list-style: none; padding: 0; margin: 0; }
+.tracks li + li { border-top: 1px solid var(--line); }
+.track { display: flex; align-items: center; gap: 8px; width: 100%; padding: 10px 2px; background: none; border: 0; color: var(--text); font: inherit; font-size: 0.9rem; text-align: left; cursor: pointer; }
+.tracks li.playing .track { color: var(--primary); font-weight: 700; }
+.tracks li.playing .track::before { content: "🔊"; }
+.marks { white-space: nowrap; }
+.mini {
+  position: fixed; left: 0; right: 0; bottom: calc(58px + env(safe-area-inset-bottom)); z-index: 4;
+  display: flex; align-items: center; gap: 8px; padding: 6px 12px; background: var(--card); border-top: 1px solid var(--line);
+}
+.mini[hidden] { display: none; }
+.mini-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); text-decoration: none; font-size: 0.9rem; font-weight: 600; }
+.mini .icon { width: 40px; height: 40px; font-size: 1rem; }
+body.has-mini { padding-bottom: calc(126px + env(safe-area-inset-bottom)); }
