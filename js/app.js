@@ -161,8 +161,12 @@ function loginView() {
         <button class="btn primary" type="submit">ログイン用のコードを送る</button>
       </form>
       <form id="f-code" hidden>
-        <p class="note">メールに届いた数字のコードを入れてください。</p>
-        <label>コード<input inputmode="numeric" autocomplete="one-time-code" id="code" required></label>
+        <p><strong>メールが届いたら、どちらかの方法でログインします。</strong></p>
+        <ol class="steps">
+          <li><strong>パソコンや、Safariで開いている場合</strong><br>メールの「Sign in」を押すと、このアプリが開いてログインできます。</li>
+          <li><strong>iPhoneのホーム画面に追加したアプリの場合</strong><br>メールの「Sign in」を<strong>長押し</strong>して「リンクをコピー」を選び、下に貼り付けて「ログイン」を押します。</li>
+        </ol>
+        <label>リンク（またはコード）を貼り付け<textarea id="code" rows="3" autocomplete="one-time-code" required></textarea></label>
         <button class="btn primary" type="submit">ログイン</button>
         <button class="btn" type="button" id="back">メールアドレスを入れ直す</button>
       </form>
@@ -181,7 +185,7 @@ function loginView() {
       await D.sendCode(view.querySelector("#email").value.trim());
       fEmail.hidden = true;
       fCode.hidden = false;
-      msg.textContent = "コードを送りました。メールを確認してください（迷惑メールフォルダも見てください）。";
+      msg.textContent = "ログイン用のメールを送りました（迷惑メールフォルダも見てください）。メールは1時間に数通までしか送れないので、続けて何度も押さないでください。";
       view.querySelector("#code").focus();
     } catch (err) {
       msg.textContent = `送れませんでした：${err.message}`;
@@ -195,7 +199,9 @@ function loginView() {
     btn.disabled = true;
     msg.textContent = "確認中…";
     try {
-      await D.verifyCode(view.querySelector("#email").value.trim(), view.querySelector("#code").value.trim());
+      const input = view.querySelector("#code").value.trim();
+      if (/^\d{6,10}$/.test(input)) await D.verifyCode(view.querySelector("#email").value.trim(), input);
+      else await D.verifyLink(input);
       location.hash = "#/";
     } catch (err) {
       msg.textContent = `ログインできませんでした：${err.message}`;
@@ -942,7 +948,14 @@ function adminView(ctx) {
 // ===== 起動 =====
 (async () => {
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+  const hash = location.hash;
   await D.init();
+  // メールのリンクから戻ってきたときの後片付け
+  if (/access_token=|error_description=/.test(hash)) {
+    const err = /error_description=([^&]+)/.exec(hash);
+    history.replaceState(null, "", location.pathname + "#/");
+    if (err) toast(`ログインできませんでした：${decodeURIComponent(err[1].replace(/\+/g, " "))}`);
+  }
   render();
   D.sync();
   setInterval(() => { if (state.user && navigator.onLine) D.sync(); }, 5 * 60 * 1000);

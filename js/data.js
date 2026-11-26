@@ -4,7 +4,7 @@ import { SUPABASE_URL, SUPABASE_KEY } from "./config.js";
 import { kv, blobs, clearAll } from "./store.js";
 
 export const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
-  auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false },
+  auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, flowType: "implicit" },
 });
 
 const DEFAULT_EXAM = "2027-01-31";
@@ -81,9 +81,36 @@ export async function init() {
 }
 
 // ===== ログイン =====
+export function appUrl() {
+  return location.origin + location.pathname;
+}
+
 export async function sendCode(email) {
-  const { error } = await sb.auth.signInWithOtp({ email, options: { shouldCreateUser: true } });
+  const { error } = await sb.auth.signInWithOtp({
+    email,
+    options: { shouldCreateUser: true, emailRedirectTo: appUrl() },
+  });
   if (error) throw error;
+}
+
+// メールの「Sign in」リンクを貼り付けてログインする（ホーム画面に追加したアプリ用）
+export async function verifyLink(text) {
+  const m = /https?:\/\/\S+/.exec(String(text).trim());
+  if (!m) throw new Error("リンクが見つかりません。メールのリンクを長押しして「リンクをコピー」してから貼り付けてください。");
+  let url;
+  try {
+    url = new URL(m[0]);
+  } catch (_) {
+    throw new Error("リンクの形がちがいます。");
+  }
+  const tokenHash = url.searchParams.get("token") || url.searchParams.get("token_hash");
+  if (!tokenHash) throw new Error("このリンクにはログイン用の情報が入っていません。");
+  const type = url.searchParams.get("type") || "magiclink";
+  const { data, error } = await sb.auth.verifyOtp({ token_hash: tokenHash, type });
+  if (error) throw error;
+  state.user = data.user;
+  emit();
+  await sync();
 }
 
 export async function verifyCode(email, token) {

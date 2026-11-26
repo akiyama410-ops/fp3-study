@@ -25,8 +25,15 @@ FP3級の勉強用の、自分専用の学習アプリです。iPhoneのホー�
 
 1. Supabase の `fp3-study` プロジェクトを開く
 2. 左のメニューの **SQL Editor** を開き、[`supabase/schema.sql`](supabase/schema.sql) の中身を全部貼り付けて **Run**
-3. **Authentication → Emails（Email Templates）→ Magic Link** の本文に、ログイン用のコード `{{ .Token }}` を入れて保存
-4. **Authentication → URL Configuration** の **Site URL** を `https://akiyama410-ops.github.io/fp3-study/` にする
+3. **Authentication → URL Configuration** の **Site URL** を `https://akiyama410-ops.github.io/fp3-study/` にする
+4. 同じ画面の **Redirect URLs** に `https://akiyama410-ops.github.io/fp3-study/**` を追加する
+
+ログインは、メールに届く「Sign in」リンクで行います。
+
+- パソコンやSafariで開いているとき：リンクを押すだけ
+- iPhoneのホーム画面に追加したアプリ：リンクを長押しして「リンクをコピー」し、ログイン画面に貼り付ける（ホーム画面のアプリとSafariは別々に動くため）
+
+無料プランの標準メールは1時間に数通までしか送れません。
 
 ### 2. アプリの公開（GitHub Pages）
 
