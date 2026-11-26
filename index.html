@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>FP3級 学習ノート</title>
+  <meta name="theme-color" content="#2f855a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="FP3学習">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <a href="#/" class="brand">FP3級 学習ノート</a>
+    <span id="sync-badge" class="badge"></span>
+  </header>
+  <main id="view"><p class="muted">読み込み中…</p></main>
+  <nav id="nav" class="tabbar" hidden>
+    <a href="#/" data-nav="home"><span>🏠</span>ホーム</a>
+    <a href="#/fields" data-nav="fields"><span>📚</span>教材</a>
+    <a href="#/record" data-nav="record"><span>📅</span>記録</a>
+    <a href="#/plan" data-nav="plan"><span>🗓️</span>計画</a>
+    <a href="#/admin" data-nav="admin"><span>⚙️</span>管理</a>
+  </nav>
+  <script src="vendor/supabase.js"></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

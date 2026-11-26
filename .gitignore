@@ -1,0 +1,4 @@
+# 教材の中身を含むファイルは公開しない
+*seed*.json
+.DS_Store
+__pycache__/
