@@ -1,6 +1,6 @@
 // 電波がなくてもアプリを開けるように、アプリ本体をこの端末に保存しておく仕組み。
 // アプリを更新したら VERSION の数字を上げてください。
-const VERSION = "v2";
+const VERSION = "v3";
 const CACHE = `fp3-app-${VERSION}`;
 const APP_FILES = [
   "./",
@@ -22,7 +22,7 @@ const APP_FILES = [
 ];
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(CACHE).then((c) => c.addAll(APP_FILES)).then(() => self.skipWaiting()));
+  event.waitUntil(caches.open(CACHE).then((c) => c.addAll(APP_FILES.map((f) => new Request(f, { cache: "reload" })))).then(() => self.skipWaiting()));
 });
 
 self.addEventListener("activate", (event) => {
@@ -35,11 +35,12 @@ self.addEventListener("activate", (event) => {
 });
 
 // アプリ本体：ネットを先に試し、だめならこの端末の保存分を使う（更新がすぐ届くように）
+// cache: "no-cache" で、ブラウザが覚えている古いファイルではなく、毎回新しい版があるかを確かめる
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
   if (event.request.method !== "GET" || url.origin !== self.location.origin) return;
   event.respondWith(
-    fetch(event.request)
+    fetch(event.request, { cache: "no-cache" })
       .then((res) => {
         if (res.ok) {
           const copy = res.clone();

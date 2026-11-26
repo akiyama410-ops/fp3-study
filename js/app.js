@@ -1151,7 +1151,21 @@ PL.onPlayer((kind) => {
 
 // ===== 起動 =====
 (async () => {
-  if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+  if ("serviceWorker" in navigator) {
+    const hadController = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.register("sw.js", { updateViaCache: "none" }).catch(() => {});
+    // 新しい版が届いたら、読み込み直して反映する（聞き流し中は止めないように、お知らせだけ）
+    let reloading = false;
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (!hadController || reloading) return;
+      if (PL.isPlaying()) {
+        toast("アプリの新しい版が届きました。次に開いたときに反映されます。");
+        return;
+      }
+      reloading = true;
+      location.reload();
+    });
+  }
   const hash = location.hash;
   await D.init();
   // メールのリンクから戻ってきたときの後片付け
