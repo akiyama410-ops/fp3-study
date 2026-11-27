@@ -116,11 +116,12 @@ async function render() {
   else if (page === "admin") current = adminView(ctx);
   else if (page === "listen") current = await listenView(ctx);
   else if (page === "exam") current = examView(a);
+  else if (page === "cards") current = cardsView(a);
   else current = homeView();
 }
 
 function setActiveNav(page) {
-  const map = { home: "home", fields: "fields", field: "fields", m: "fields", quiz: "fields", record: "record", plan: "plan", admin: "admin", listen: "listen", exam: "fields" };
+  const map = { home: "home", fields: "fields", field: "fields", m: "fields", quiz: "fields", record: "record", plan: "plan", admin: "admin", listen: "listen", exam: "fields", cards: "fields" };
   for (const a of nav.querySelectorAll("a")) a.classList.toggle("active", a.dataset.nav === map[page]);
   updateMini();
 }
@@ -246,6 +247,16 @@ function homeView() {
       <div class="stat"><span>連続</span><strong>${S.streak()}日</strong></div>
       <div class="stat"><span>勉強時間</span><strong>${S.fmtDuration(S.totalSeconds())}</strong></div>
     </section>
+    ${(() => {
+      const r = S.reviewSummary();
+      if (!r.due && !r.later) return "";
+      return `<section class="card review-card">
+        <h2>🔁 今日の復習</h2>
+        <p>${r.due ? `<strong>${r.due}問</strong> の復習があります。忘れる前に解いておきましょう。` : "今日の復習はありません。"}</p>
+        <p class="note">これからの復習 ${r.later}問 ・ 卒業 ${r.graduated}問（まちがえた問題を1日後・3日後・7日後に出します）</p>
+        ${r.due ? `<a class="btn primary" href="#/quiz/review">今日の復習を解く（${r.due}問）</a>` : ""}
+      </section>`;
+    })()}
     <section class="card">
       <h2>今日やること</h2>
       ${
@@ -297,7 +308,7 @@ function fieldsView() {
     return { live: true };
   }
   view.innerHTML = `
-    <div class="toolbar"><a class="btn primary" href="#/exam">📝 模擬試験</a><a class="btn" href="#/quiz/all">ランダムに20問</a><a class="btn" href="#/quiz/wrong">まちがえた問題</a></div>
+    <div class="toolbar"><a class="btn primary" href="#/exam">📝 模擬試験</a><a class="btn" href="#/cards">🃏 暗記カード</a><a class="btn" href="#/quiz/all">ランダムに20問</a><a class="btn" href="#/quiz/wrong">まちがえた問題</a></div>
     ${FIELDS.map((f) => {
       const ms = S.materialsOf(f.key);
       if (!ms.length) return "";
@@ -679,6 +690,10 @@ function quizView(scope = "all") {
     list = shuffle(S.wrongQuestions());
     title = "まちがえた問題";
     back = "#/";
+  } else if (scope === "review") {
+    list = shuffle(S.dueReviews());
+    title = "今日の復習";
+    back = "#/";
   } else {
     list = shuffle(state.questions).slice(0, 20);
     title = "ランダム20問";
@@ -1033,6 +1048,108 @@ function examResult() {
         .join("")}</ol>
     </section>`;
   return { live: false };
+}
+
+// ===== 暗記カード =====
+const CARD_KEY = "fp3-cards";
+function cardsOf(m) {
+  const doc = new DOMParser().parseFromString(`<div>${m.content_html}</div>`, "text/html");
+  const h = [...doc.querySelectorAll("h2")].find((x) => x.textContent.includes("覚えるべき数字"));
+  if (!h) return [];
+  let el = h.nextElementSibling;
+  while (el && el.tagName !== "TABLE" && el.tagName !== "H2") el = el.nextElementSibling;
+  if (!el || el.tagName !== "TABLE") return [];
+  return [...el.querySelectorAll("tr")]
+    .map((tr) => [...tr.querySelectorAll("td")].map((td) => td.textContent.trim()))
+    .filter((c) => c.length >= 2 && c[0] && c[1])
+    .map((c, i) => ({ id: `${m.id}:${i}`, mid: m.id, field: m.field, front: c[0], back: c[1] }));
+}
+
+function cardsView(scope = "all") {
+  const marks = loadJson(CARD_KEY) || {};
+  const mats = S.sortedMaterials().filter((m) => scope === "all" || m.field === scope);
+  const all = mats.flatMap(cardsOf);
+  const known = (c) => marks[c.id] === "known";
+  let onlyTodo = loadJson("fp3-cards-todo") ?? true;
+  let deck = [];
+  let i = 0;
+  let flipped = false;
+  const timer = new Timer("cards", 1800);
+  timer.pauseOnHide = true;
+  activeTimers.add(timer);
+  timer.start();
+
+  const build = () => {
+    deck = shuffle(onlyTodo ? all.filter((c) => !known(c)) : all);
+    i = 0;
+    flipped = false;
+  };
+  const draw = () => {
+    const done = all.filter(known).length;
+    const c = deck[i];
+    const m = c && state.materials.find((x) => x.id === c.mid);
+    view.innerHTML = `
+      <a class="back" href="#/fields">‹ 教材一覧</a>
+      <section class="card">
+        <h1>🃏 暗記カード</h1>
+        <div class="scope">
+          <a class="pill ${scope === "all" ? "on" : ""}" href="#/cards/all">すべて</a>
+          ${FIELDS.map((f) => `<a class="pill ${scope === f.key ? "on" : ""}" href="#/cards/${f.key}"><span class="dot" style="background:${f.color}"></span>${esc(f.short)}</a>`).join("")}
+        </div>
+        <p>覚えた <strong>${done}</strong> / ${all.length}枚</p>
+        ${bar(all.length ? done / all.length : 0)}
+        <label class="check"><input type="checkbox" id="todo" ${onlyTodo ? "checked" : ""}> まだ覚えていないカードだけ</label>
+      </section>
+      ${
+        c
+          ? `<section class="card flash ${flipped ? "flipped" : ""}" id="flash" role="button" tabindex="0" aria-label="カードをめくる">
+              <div class="muted small">${esc(m ? m.title : "")} ・ ${i + 1} / ${deck.length}</div>
+              <p class="flash-front">${esc(c.front)}</p>
+              ${flipped ? `<p class="flash-back">${esc(c.back)}</p>` : `<p class="note">タップしてめくる</p>`}
+            </section>
+            ${flipped ? `<div class="answer-btns"><button class="btn" id="later">もう一度</button><button class="btn primary" id="got">覚えた ✓</button></div>` : ""}`
+          : `<section class="card"><p>${all.length ? "このカードは全部覚えました！🎉" : "カードがありません。"}</p>
+              ${all.length ? `<button class="btn" id="reset">覚えた印を消して、最初からやり直す</button>` : ""}</section>`
+      }`;
+    const flash = view.querySelector("#flash");
+    if (flash) flash.addEventListener("click", () => { flipped = !flipped; draw(); });
+    view.querySelector("#todo").addEventListener("change", (e) => {
+      onlyTodo = e.target.checked;
+      saveJson("fp3-cards-todo", onlyTodo);
+      build();
+      draw();
+    });
+    const mark = (v) => {
+      if (v) marks[c.id] = "known";
+      else delete marks[c.id];
+      saveJson(CARD_KEY, marks);
+      if (!v) deck.push(c); // 「もう一度」は最後にもう一回出す
+      i += 1;
+      flipped = false;
+      draw();
+    };
+    const got = view.querySelector("#got");
+    if (got) got.addEventListener("click", () => mark(true));
+    const later = view.querySelector("#later");
+    if (later) later.addEventListener("click", () => mark(false));
+    const reset = view.querySelector("#reset");
+    if (reset) reset.addEventListener("click", () => {
+      if (!confirm("この範囲の「覚えた」の印を消しますか？")) return;
+      for (const x of all) delete marks[x.id];
+      saveJson(CARD_KEY, marks);
+      build();
+      draw();
+    });
+  };
+  build();
+  draw();
+  return {
+    live: false,
+    cleanup() {
+      timer.stop();
+      activeTimers.delete(timer);
+    },
+  };
 }
 
 // ===== 記録 =====

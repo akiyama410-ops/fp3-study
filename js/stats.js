@@ -150,3 +150,54 @@ export function fmtDuration(sec) {
 export function pct(r) {
   return `${Math.round((r || 0) * 100)}%`;
 }
+
+// ===== 忘れる前に出る復習 =====
+// まちがえた問題を、1日後 → 3日後 → 7日後 に出す。
+// 予定日以降に正解すると次の間隔へ進み、まちがえると最初（1日後）にもどる。3回続けて正解したら卒業。
+export const INTERVALS = [1, 3, 7];
+
+function addDaysStr(dayStr, n) {
+  const d = new Date(`${dayStr}T00:00:00`);
+  d.setDate(d.getDate() + n);
+  return localDay(d);
+}
+
+export function reviewStates() {
+  const byQ = {};
+  for (const a of state.attempts) (byQ[a.question_id] = byQ[a.question_id] || []).push(a);
+  const out = {};
+  for (const [qid, list] of Object.entries(byQ)) {
+    list.sort((x, y) => (x.answered_at < y.answered_at ? -1 : 1));
+    let lastWrong = -1;
+    list.forEach((a, i) => { if (!a.correct) lastWrong = i; });
+    if (lastWrong < 0) continue; // 一度もまちがえていない
+    let stage = 0;
+    let base = localDay(new Date(list[lastWrong].answered_at));
+    for (const a of list.slice(lastWrong + 1)) {
+      const day = localDay(new Date(a.answered_at));
+      if (day >= addDaysStr(base, INTERVALS[stage])) {
+        stage += 1;
+        base = day;
+        if (stage >= INTERVALS.length) break;
+      }
+    }
+    out[qid] = stage >= INTERVALS.length ? { stage, due: null } : { stage, due: addDaysStr(base, INTERVALS[stage]) };
+  }
+  return out;
+}
+
+export function dueReviews() {
+  const st = reviewStates();
+  const t = today();
+  return state.questions.filter((q) => st[q.id] && st[q.id].due && st[q.id].due <= t);
+}
+
+export function reviewSummary() {
+  const st = Object.values(reviewStates());
+  const t = today();
+  return {
+    due: st.filter((s) => s.due && s.due <= t).length,
+    later: st.filter((s) => s.due && s.due > t).length,
+    graduated: st.filter((s) => !s.due).length,
+  };
+}
