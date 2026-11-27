@@ -2,7 +2,10 @@
 """教材HTMLから、アプリに取り込むためのデータ(seed.json)を作るスクリプト。
 
 使い方:
-    python3 tools/build_seed.py <教材HTMLのフォルダ> <出力先.json>
+    python3 tools/build_seed.py <教材HTMLのフォルダ> <出力先.json> [追加の問題.json ...]
+
+追加の問題（JSONの配列）は、教材の○×問題（各8問）のあとに加えます。
+三択問題は {"kind": "choice", "choices": [3つ], "answer_index": 0〜2} の形です。
 
 できた seed.json は教材の中身を含むので、リポジトリには入れません
 （.gitignore で除外しています）。アプリの「管理」画面から取り込みます。
@@ -98,6 +101,7 @@ def build(src: Path) -> dict:
                 "id": f"{mid}-{n}",
                 "material_id": mid,
                 "sort": n,
+                "kind": "ox",
                 "text": text(q),
                 "answer": mark == "○",
                 "explanation": expl,
@@ -116,13 +120,41 @@ def build(src: Path) -> dict:
     return {"version": 1, "materials": materials, "questions": questions}
 
 
+def check_extra(q: dict, mids: set) -> dict:
+    base = {k: q[k] for k in ("id", "material_id", "sort", "text", "explanation")}
+    if q["material_id"] not in mids:
+        raise ValueError(f"{q['id']}: unknown material")
+    if q.get("kind") == "choice":
+        if len(q["choices"]) != 3 or q["answer_index"] not in (0, 1, 2):
+            raise ValueError(f"{q['id']}: bad choice question")
+        return {**base, "kind": "choice", "choices": [str(c) for c in q["choices"]], "answer_index": int(q["answer_index"])}
+    if not isinstance(q.get("answer"), bool):
+        raise ValueError(f"{q['id']}: answer must be true/false")
+    return {**base, "kind": "ox", "answer": q["answer"]}
+
+
+def add_extra(data: dict, paths: list) -> None:
+    mids = {m["id"] for m in data["materials"]}
+    ids = {q["id"] for q in data["questions"]}
+    for path in paths:
+        for q in json.loads(Path(path).read_text(encoding="utf-8")):
+            q = check_extra(q, mids)
+            if q["id"] in ids:
+                raise ValueError(f"duplicate id {q['id']}")
+            ids.add(q["id"])
+            data["questions"].append(q)
+    data["version"] = 2 if paths else 1
+
+
 def main() -> None:
-    if len(sys.argv) != 3:
+    if len(sys.argv) < 3:
         print(__doc__)
         sys.exit(1)
     data = build(Path(sys.argv[1]))
+    add_extra(data, sys.argv[3:])
     Path(sys.argv[2]).write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-    print(f"materials={len(data['materials'])} questions={len(data['questions'])}")
+    choice = sum(1 for q in data["questions"] if q.get("kind") == "choice")
+    print(f"materials={len(data['materials'])} questions={len(data['questions'])} (choice={choice})")
 
 
 if __name__ == "__main__":
