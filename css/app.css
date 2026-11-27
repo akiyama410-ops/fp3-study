@@ -270,3 +270,11 @@ body.has-mini { padding-bottom: calc(126px + env(safe-area-inset-bottom)); }
 .flag { margin-top: 12px; }
 .review li { margin-bottom: 14px; }
 .review p { margin: 4px 0; }
+
+/* ===== 復習・暗記カード ===== */
+.review-card { border-color: var(--primary); }
+a.pill { text-decoration: none; }
+.flash { min-height: 220px; display: flex; flex-direction: column; justify-content: center; text-align: center; cursor: pointer; user-select: none; }
+.flash-front { font-size: 1.2rem; font-weight: 700; margin: 12px 0; }
+.flash-back { font-size: 1.1rem; color: var(--primary); font-weight: 700; margin: 8px 0 0; padding-top: 12px; border-top: 1px dashed var(--line); }
+.flash.flipped { border-color: var(--primary); }
