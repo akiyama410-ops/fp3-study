@@ -2,7 +2,10 @@
 """教材HTMLから、アプリに取り込むためのデータ(seed.json)を作るスクリプト。
 
 使い方:
-    python3 tools/build_seed.py <教材HTMLのフォルダ> <出力先.json> [追加の問題.json ...]
+    python3 tools/build_seed.py <教材HTMLのフォルダ> <出力先.json> [追加の問題.json ...] [--figs 図.json ...]
+
+図（イラスト・図解）は {"material_id", "kind": "illust"|"diagram", "after": 見出し or "top",
+"caption", "svg"} の配列です。"after" の見出し（<h2>）のすぐ後ろに入れます。
 
 追加の問題（JSONの配列）は、教材の○×問題（各8問）のあとに加えます。
 三択問題は {"kind": "choice", "choices": [3つ], "answer_index": 0〜2} の形です。
@@ -146,15 +149,49 @@ def add_extra(data: dict, paths: list) -> None:
     data["version"] = 2 if paths else 1
 
 
+FORBIDDEN = re.compile(r"<\s*(script|style|image|foreignObject)\b|\son\w+\s*=|\sstyle\s*=|href\s*=", re.I)
+
+
+def add_figs(data: dict, paths: list) -> int:
+    by_id = {m["id"]: m for m in data["materials"]}
+    n = 0
+    for path in paths:
+        for f in json.loads(Path(path).read_text(encoding="utf-8")):
+            m = by_id.get(f["material_id"])
+            svg = f["svg"].strip()
+            if m is None or not svg.startswith("<svg") or FORBIDDEN.search(svg):
+                raise ValueError(f"bad figure for {f.get('material_id')}: {f.get('caption')}")
+            kind = "illust" if f["kind"] == "illust" else "diagram"
+            cap = f.get("caption") or ""
+            fig = f'<figure class="fig fig-{kind}">{svg}' + (f"<figcaption>{cap}</figcaption>" if cap else "") + "</figure>"
+            html = m["content_html"]
+            if f["after"] == "top":
+                html = fig + html
+            else:
+                h = f"<h2>{f['after']}</h2>"
+                if h not in html:
+                    raise ValueError(f"heading not found in {m['id']}: {f['after']}")
+                html = html.replace(h, h + fig, 1)
+            m["content_html"] = html
+            n += 1
+    return n
+
+
 def main() -> None:
     if len(sys.argv) < 3:
         print(__doc__)
         sys.exit(1)
     data = build(Path(sys.argv[1]))
-    add_extra(data, sys.argv[3:])
+    rest = sys.argv[3:]
+    figs = []
+    if "--figs" in rest:
+        i = rest.index("--figs")
+        rest, figs = rest[:i], rest[i + 1:]
+    add_extra(data, rest)
+    nfig = add_figs(data, figs)
     Path(sys.argv[2]).write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
     choice = sum(1 for q in data["questions"] if q.get("kind") == "choice")
-    print(f"materials={len(data['materials'])} questions={len(data['questions'])} (choice={choice})")
+    print(f"materials={len(data['materials'])} questions={len(data['questions'])} (choice={choice}) figures={nfig}")
 
 
 if __name__ == "__main__":
