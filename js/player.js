@@ -26,7 +26,7 @@ export const P = {
   scope: readPref("fp3-listen-scope", "all"),
   shuffle: readPref("fp3-listen-shuffle", false),
   repeat: readPref("fp3-listen-repeat", false),
-  speed: Number(localStorage.getItem("fp3-speed")) || 1,
+  speed: [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2].includes(Number(localStorage.getItem("fp3-speed"))) ? Number(localStorage.getItem("fp3-speed")) : 1,
   volume: readPref("fp3-volume", 1),
   sleepAt: null, // 止める時刻（ミリ秒）
   sleepEnd: false, // 今の音声が終わったら止める
@@ -189,14 +189,21 @@ export function seek(sec) {
   if (audio.duration) audio.currentTime = Math.min(Math.max(0, sec), audio.duration - 0.5);
 }
 
-const SPEEDS = [0.75, 1, 1.25, 1.5, 1.75, 2];
-export function cycleSpeed() {
-  P.speed = SPEEDS[(SPEEDS.indexOf(P.speed) + 1) % SPEEDS.length] || 1;
+export const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
+
+// 速さを変える（教材ページの音声・動画と共通の設定）
+export function setSpeed(v) {
+  const n = Number(v);
+  P.speed = SPEEDS.includes(n) ? n : 1;
   audio.playbackRate = P.speed;
   try {
     localStorage.setItem("fp3-speed", String(P.speed));
   } catch (_) {}
   notify();
+}
+
+export function speedOptions(current) {
+  return SPEEDS.map((v) => `<option value="${v}" ${v === current ? "selected" : ""}>${v}倍</option>`).join("");
 }
 
 export function setVolume(v) {
