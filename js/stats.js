@@ -78,7 +78,14 @@ export function accuracy(filterFn = () => true) {
 
 export function fieldOfMaterial(mid) {
   const m = state.materials.find((x) => x.id === mid);
-  return m ? m.field : null;
+  if (m) return m.field;
+  // 実技の問題は「jitsugi-分野」という教材IDにしている
+  const j = /^jitsugi-(\w+)$/.exec(mid || "");
+  return j ? j[1] : null;
+}
+
+export function isJitsugi(q) {
+  return String(q.material_id || "").startsWith("jitsugi-");
 }
 
 export function wrongQuestions() {

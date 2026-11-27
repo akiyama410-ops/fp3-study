@@ -117,11 +117,14 @@ async function render() {
   else if (page === "listen") current = await listenView(ctx);
   else if (page === "exam") current = examView(a);
   else if (page === "cards") current = cardsView(a);
+  else if (page === "jitsugi") current = jitsugiView();
+  else if (page === "marks") current = marksView();
+  else if (page === "fs") current = await fieldSlidesView(a, ctx);
   else current = homeView();
 }
 
 function setActiveNav(page) {
-  const map = { home: "home", fields: "fields", field: "fields", m: "fields", quiz: "fields", record: "record", plan: "plan", admin: "admin", listen: "listen", exam: "fields", cards: "fields" };
+  const map = { home: "home", fields: "fields", field: "fields", m: "fields", quiz: "fields", record: "record", plan: "plan", admin: "admin", listen: "listen", exam: "fields", cards: "fields", jitsugi: "fields", marks: "fields", fs: "fields" };
   for (const a of nav.querySelectorAll("a")) a.classList.toggle("active", a.dataset.nav === map[page]);
   updateMini();
 }
@@ -308,7 +311,7 @@ function fieldsView() {
     return { live: true };
   }
   view.innerHTML = `
-    <div class="toolbar"><a class="btn primary" href="#/exam">📝 模擬試験</a><a class="btn" href="#/cards">🃏 暗記カード</a><a class="btn" href="#/quiz/all">ランダムに20問</a><a class="btn" href="#/quiz/wrong">まちがえた問題</a></div>
+    <div class="toolbar"><a class="btn primary" href="#/exam">📝 模擬試験</a><a class="btn" href="#/cards">🃏 暗記カード</a><a class="btn" href="#/jitsugi">🧮 実技対策</a><a class="btn" href="#/marks">★ メモ・しおり</a><a class="btn" href="#/quiz/all">ランダムに20問</a><a class="btn" href="#/quiz/wrong">まちがえた問題</a></div>
     ${FIELDS.map((f) => {
       const ms = S.materialsOf(f.key);
       if (!ms.length) return "";
@@ -328,7 +331,7 @@ function fieldView(key) {
       <h1 style="color:${f.color}">${esc(f.name)}</h1>
       <p>進み具合 ${S.pct(S.fieldRate(key))} ・ 正解率 ${acc.rate == null ? "—" : S.pct(acc.rate)}（${acc.answered}問解答）</p>
       ${bar(S.fieldRate(key), f.color)}
-      <div class="toolbar"><a class="btn primary" href="#/quiz/f-${key}">この分野の問題を解く</a></div>
+      <div class="toolbar"><a class="btn primary" href="#/quiz/f-${key}">この分野の問題を解く</a>${D.mediaFor(`field-${key}`, "slides") ? `<a class="btn" href="#/fs/${key}">📑 まとめスライド</a>` : ""}</div>
     </section>
     <section class="card"><ul class="list">${ms.map(materialRow).join("")}</ul></section>`;
   return { live: true };
@@ -360,7 +363,19 @@ async function materialView(mid, tab, ctx) {
       .map((t) => `<a class="tab ${t === active ? "active" : ""}" href="#/m/${encodeURIComponent(mid)}/${t}">${KIND_LABEL[t]}</a>`)
       .join("")}</div>
     <section class="card" id="panel"></section>
+    <section class="card memo">
+      <div class="memo-head"><h2>📝 メモ</h2><button class="btn small star-btn" id="star-m"></button></div>
+      <textarea id="memo" rows="3" placeholder="自分用のメモ（この端末に保存されます）"></textarea>
+    </section>
     ${tabs.length === 2 && !D.mediaFor(mid, "audio") ? `<p class="note">音声・動画・スライドは、パソコンの「管理」からアップロードできます。</p>` : ""}`;
+
+  const memoEl = view.querySelector("#memo");
+  memoEl.value = getNotes()[mid] || "";
+  memoEl.addEventListener("input", () => setNote(mid, memoEl.value));
+  const starM = view.querySelector("#star-m");
+  const drawStar = () => { starM.textContent = getStars().materials[mid] ? "★ あとで見る" : "☆ あとで見る"; };
+  drawStar();
+  starM.addEventListener("click", () => { toggleStar("materials", mid); drawStar(); });
 
   const chips = view.querySelector("#chips");
   const drawChips = () => {
@@ -683,19 +698,29 @@ function quizView(scope = "all") {
     back = `#/m/${encodeURIComponent(mid)}/quiz`;
   } else if (scope.startsWith("f-")) {
     const key = scope.slice(2);
-    list = shuffle(state.questions.filter((q) => S.fieldOfMaterial(q.material_id) === key));
+    list = shuffle(state.questions.filter((q) => S.fieldOfMaterial(q.material_id) === key && !S.isJitsugi(q)));
     title = fieldInfo(key).name;
     back = `#/field/${key}`;
   } else if (scope === "wrong") {
     list = shuffle(S.wrongQuestions());
     title = "まちがえた問題";
     back = "#/";
+  } else if (scope.startsWith("j-")) {
+    const key = scope.slice(2);
+    list = shuffle(state.questions.filter((q) => S.isJitsugi(q) && (key === "all" || S.fieldOfMaterial(q.material_id) === key)));
+    title = key === "all" ? "実技の練習" : `実技の練習（${fieldInfo(key).short}）`;
+    back = "#/jitsugi";
+  } else if (scope === "starred") {
+    const stars = getStars();
+    list = state.questions.filter((q) => stars.questions[q.id]);
+    title = "★ あとで見る問題";
+    back = "#/marks";
   } else if (scope === "review") {
     list = shuffle(S.dueReviews());
     title = "今日の復習";
     back = "#/";
   } else {
-    list = shuffle(state.questions).slice(0, 20);
+    list = shuffle(state.questions.filter((q) => !S.isJitsugi(q))).slice(0, 20);
     title = "ランダム20問";
   }
   const timer = new Timer("quiz", 1800);
@@ -746,8 +771,13 @@ function quizView(scope = "all") {
         view.querySelector("#feedback").innerHTML = `
           <p class="verdict ${correct ? "ok" : "ng"}">${correct ? "正解！" : "不正解…"}　答えは「${esc(answerLabel(q))}」</p>
           <p class="explain">${esc(q.explanation)}</p>
+          <button class="btn small star-btn" id="star-q">${getStars().questions[q.id] ? "★ あとで見る（登録済み）" : "☆ あとで見るに入れる"}</button>
           <button class="btn primary" id="next">${i + 1 < list.length ? "次の問題へ" : "結果を見る"}</button>`;
         view.querySelector("#next").addEventListener("click", () => { i += 1; draw(); window.scrollTo(0, 0); });
+        view.querySelector("#star-q").addEventListener("click", (e) => {
+          const on = toggleStar("questions", q.id);
+          e.target.textContent = on ? "★ あとで見る（登録済み）" : "☆ あとで見るに入れる";
+        });
         await D.addAttempt(q.id, correct);
       }),
     );
@@ -766,6 +796,7 @@ function quizView(scope = "all") {
 const EXAM = {
   full: { label: "本番形式", total: 60, ox: 30, choice: 30, minutes: 90, pass: 36 },
   mini: { label: "ミニ模試", total: 20, ox: 10, choice: 10, minutes: 30, pass: 12 },
+  jitsugi: { label: "実技模試（FP協会）", total: 20, ox: 0, choice: 20, minutes: 60, pass: 12, jitsugi: true },
 };
 const EXAM_KEY = "fp3-exam";
 const EXAM_LAST_KEY = "fp3-exam-last";
@@ -792,7 +823,7 @@ function spread(n) {
 }
 function pickExam(mode) {
   const cfg = EXAM[mode];
-  const byKind = (kind) => state.questions.filter((q) => (q.kind || "ox") === kind);
+  const byKind = (kind) => state.questions.filter((q) => (q.kind || "ox") === kind && !!cfg.jitsugi === S.isJitsugi(q));
   const pick = (pool, n) => {
     const counts = spread(n);
     let out = [];
@@ -819,14 +850,14 @@ function examView(sub) {
     <a class="back" href="#/fields">‹ 教材一覧</a>
     <section class="card">
       <h1>📝 模擬試験</h1>
-      <p class="note">FP3級の学科試験と同じく、前半が○×問題、後半が三択問題です。6分野からかたよりなく出題し、時間になると自動で採点します。</p>
+      <p class="note">学科（本番形式・ミニ模試）は、前半が○×問題、後半が三択問題です。実技模試は、日本FP協会の資産設計提案業務の形（資料を読んで計算する問題）です。どれも6分野からかたよりなく出題し、時間になると自動で採点します。</p>
       ${hasChoice ? "" : `<p class="note err">三択問題がまだ入っていないため、今は○×問題だけで出題します。</p>`}
       ${
         active
           ? `<div class="resume"><p><strong>${esc(EXAM[active.mode].label)}</strong>の途中です（${Object.keys(active.answers).length} / ${active.ids.length}問 解答済み）</p>
              <div class="toolbar"><a class="btn primary" href="#/exam/run">続きから解く</a><button class="btn" id="abandon">やめる</button></div></div>`
           : `<div class="exam-modes">
-              ${["full", "mini"]
+              ${["full", "mini", "jitsugi"]
                 .map((k) => {
                   const c = EXAM[k];
                   return `<button class="exam-mode" data-mode="${k}"><strong>${esc(c.label)}</strong><span>${c.total}問・${c.minutes}分</span><small>${c.pass}問以上で合格</small></button>`;
@@ -855,7 +886,7 @@ function examView(sub) {
       const mode = b.dataset.mode;
       const ids = pickExam(mode);
       if (!ids.length) {
-        toast("問題がありません。先に教材データを取り込んでください");
+        toast(EXAM[mode].jitsugi ? "実技の問題がまだ入っていません。管理画面で新しい教材データを取り込んでください" : "問題がありません。先に教材データを取り込んでください");
         return;
       }
       const now = Date.now();
@@ -893,7 +924,7 @@ function examRun() {
     const i = Math.min(ex.cur, qs.length - 1);
     const q = qs[i];
     const answered = Object.keys(ex.answers).length;
-    const part = q.kind === "choice" ? "三択問題" : "○×問題";
+    const part = cfg.jitsugi ? "実技" : q.kind === "choice" ? "三択問題" : "○×問題";
     view.innerHTML = `
       <div class="exam-head">
         <span>${esc(cfg.label)}</span>
@@ -1152,6 +1183,91 @@ function cardsView(scope = "all") {
   };
 }
 
+// ===== メモ・しおり（この端末だけに保存） =====
+function getNotes() {
+  return loadJson("fp3-notes") || {};
+}
+function setNote(mid, text) {
+  const n = getNotes();
+  if (text.trim()) n[mid] = text;
+  else delete n[mid];
+  saveJson("fp3-notes", n);
+}
+function getStars() {
+  const s = loadJson("fp3-stars") || {};
+  return { materials: s.materials || {}, questions: s.questions || {} };
+}
+function toggleStar(kind, id) {
+  const s = getStars();
+  if (s[kind][id]) delete s[kind][id];
+  else s[kind][id] = new Date().toISOString();
+  saveJson("fp3-stars", s);
+  return !!s[kind][id];
+}
+
+function marksView() {
+  const stars = getStars();
+  const notes = getNotes();
+  const mats = S.sortedMaterials();
+  const starMats = mats.filter((m) => stars.materials[m.id]);
+  const noteMats = mats.filter((m) => notes[m.id]);
+  const starQs = state.questions.filter((q) => stars.questions[q.id]);
+  view.innerHTML = `
+    <a class="back" href="#/fields">‹ 教材一覧</a>
+    <section class="card">
+      <h1>★ メモ・しおり</h1>
+      <p class="note">メモと「あとで見る」の印は、この端末だけに保存されます。</p>
+    </section>
+    <section class="card">
+      <h2>★ あとで見る教材（${starMats.length}）</h2>
+      ${starMats.length ? `<ul class="list">${starMats.map(materialRow).join("")}</ul>` : `<p class="muted">教材ページの「☆ あとで見る」を押すと、ここに並びます。</p>`}
+    </section>
+    <section class="card">
+      <h2>★ あとで見る問題（${starQs.length}）</h2>
+      ${starQs.length ? `<a class="btn primary" href="#/quiz/starred">まとめて解く</a><ol class="qlist">${starQs.map((q) => `<li>${esc(q.text.split("\n")[0])}</li>`).join("")}</ol>` : `<p class="muted">問題の答えのあとに出る「☆ あとで見るに入れる」を押すと、ここに並びます。</p>`}
+    </section>
+    <section class="card">
+      <h2>📝 メモ（${noteMats.length}）</h2>
+      ${noteMats.length ? `<ul class="list">${noteMats.map((m) => `<li><a class="row" href="#/m/${encodeURIComponent(m.id)}"><span class="grow"><span class="row-title">${esc(m.title)}</span><span class="note">${esc(notes[m.id].slice(0, 80))}</span></span></a></li>`).join("")}</ul>` : `<p class="muted">教材ページの下にメモを書くと、ここに並びます。</p>`}
+    </section>`;
+  return { live: true };
+}
+
+// ===== 実技対策（日本FP協会・資産設計提案業務） =====
+function jitsugiView() {
+  const js = state.questions.filter((q) => S.isJitsugi(q));
+  const acc = S.accuracy((q) => S.isJitsugi(q));
+  view.innerHTML = `
+    <a class="back" href="#/fields">‹ 教材一覧</a>
+    <section class="card">
+      <h1>🧮 実技対策</h1>
+      <p class="note">日本FP協会の実技試験（資産設計提案業務）の形で、資料を読んで計算する問題を練習します。本番は20問・60分です。</p>
+      ${js.length ? `<p>問題 ${js.length}問 ・ 正解率 ${acc.rate == null ? "—" : S.pct(acc.rate)}（${acc.answered}問解答）</p>
+        <div class="toolbar"><a class="btn primary" href="#/quiz/j-all">全分野から練習</a><a class="btn" href="#/exam">実技模試を受ける</a></div>` : `<p class="note err">実技の問題がまだ入っていません。パソコンの「管理」で新しい教材データを取り込んでください。</p>`}
+    </section>
+    ${js.length ? `<section class="card"><h2>分野ごとに練習</h2><ul class="list">${FIELDS.map((f) => {
+      const n = js.filter((q) => S.fieldOfMaterial(q.material_id) === f.key).length;
+      const a = S.accuracy((q) => S.isJitsugi(q) && S.fieldOfMaterial(q.material_id) === f.key);
+      return n ? `<li><a class="row" href="#/quiz/j-${f.key}"><span class="dot" style="background:${f.color}"></span><span class="grow"><span class="row-title">${esc(f.name)}</span></span><span class="num">${n}問<small>${a.rate == null ? "" : `正解${S.pct(a.rate)}`}</small></span></a></li>` : "";
+    }).join("")}</ul></section>` : ""}`;
+  return { live: true };
+}
+
+// ===== 分野のまとめスライド =====
+async function fieldSlidesView(key, ctx) {
+  const f = fieldInfo(key);
+  const pseudo = { id: `field-${key}`, title: `${f.name} まとめ`, field: key };
+  view.innerHTML = `<a class="back" href="#/field/${key}">‹ ${esc(f.name)}</a>
+    <section class="card"><h1>📑 ${esc(f.name)} まとめスライド</h1></section>
+    <section class="card" id="panel"></section>`;
+  if (!D.mediaFor(pseudo.id, "slides")) {
+    view.querySelector("#panel").innerHTML = `<p>まとめスライドはまだアップロードされていません。パソコンの「管理」から、教材で「【まとめ】${esc(f.name)}」を選んでアップロードできます。</p>`;
+    return { live: true };
+  }
+  const cleanup = await slidesPanel(view.querySelector("#panel"), pseudo, ctx);
+  return { live: false, cleanup: () => cleanup && cleanup() };
+}
+
 // ===== 記録 =====
 function recordView(monthStr) {
   const byDay = S.secondsByDay();
@@ -1259,7 +1375,8 @@ function adminView(ctx) {
         ${bar(used / STORAGE_LIMIT, used > STORAGE_LIMIT * 0.9 ? "#c53030" : undefined)}
         <p class="note">1ファイル50MBまで。家族カレンダーのプロジェクトと容量を分け合うので、少し余裕を残しておきましょう。</p>
         <form id="up-form" class="stack">
-          <label>教材<select id="up-mat">${mats.map((m) => `<option value="${esc(m.id)}">${esc(m.title)}</option>`).join("")}</select></label>
+          <label>教材<select id="up-mat"><optgroup label="教材">${mats.map((m) => `<option value="${esc(m.id)}">${esc(m.title)}</option>`).join("")}</optgroup>
+            <optgroup label="分野のまとめ（スライドだけ）">${FIELDS.map((f) => `<option value="field-${f.key}">【まとめ】${esc(f.name)}</option>`).join("")}</optgroup></select></label>
           <label>種類<select id="up-kind"><option value="audio">音声</option><option value="video">動画</option><option value="slides">スライド（PDF・画像）</option></select></label>
           <label class="file">ファイルを選ぶ<input type="file" id="up-file"></label>
           <button class="btn primary" type="submit">アップロード</button>
@@ -1270,7 +1387,7 @@ function adminView(ctx) {
       <section class="card">
         <h2>アップロード済みのファイル</h2>
         <table class="table small"><thead><tr><th>教材</th><th>音声</th><th>動画</th><th>スライド</th></tr></thead><tbody>
-        ${mats
+        ${[...mats, ...FIELDS.map((f) => ({ id: `field-${f.key}`, title: `【まとめ】${f.name}` }))]
           .map(
             (m) => `<tr><td>${esc(m.title)}</td>${["audio", "video", "slides"]
               .map((k) => {
@@ -1329,6 +1446,7 @@ function adminView(ctx) {
         : kind === "video" ? type.startsWith("video/") || /\.(mp4|mov|m4v)$/i.test(file.name)
         : type === "application/pdf" || type.startsWith("image/") || /\.(pdf|png|jpe?g)$/i.test(file.name);
       if (!okType) { msg.textContent = "選んだ種類とファイルの形式が合っていません。"; return; }
+      if (mid.startsWith("field-") && kind !== "slides") { msg.textContent = "分野のまとめには、スライド（PDF）だけアップロードできます。"; return; }
       const used = state.media.reduce((s, m) => s + Number(m.size_bytes || 0), 0);
       const old = D.mediaFor(mid, kind);
       if (used - (old ? old.size_bytes : 0) + file.size > STORAGE_LIMIT) { msg.textContent = "保管庫の容量が足りません。いらないファイルを削除してください。"; return; }

@@ -1,6 +1,6 @@
 // 電波がなくてもアプリを開けるように、アプリ本体をこの端末に保存しておく仕組み。
 // アプリを更新したら VERSION の数字を上げてください。
-const VERSION = "v6";
+const VERSION = "v7";
 const CACHE = `fp3-app-${VERSION}`;
 const APP_FILES = [
   "./",

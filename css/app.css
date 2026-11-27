@@ -278,3 +278,13 @@ a.pill { text-decoration: none; }
 .flash-front { font-size: 1.2rem; font-weight: 700; margin: 12px 0; }
 .flash-back { font-size: 1.1rem; color: var(--primary); font-weight: 700; margin: 8px 0 0; padding-top: 12px; border-top: 1px dashed var(--line); }
 .flash.flipped { border-color: var(--primary); }
+
+/* ===== 実技・メモ ===== */
+.question, .explain, .flash-front { white-space: pre-line; }
+.memo-head { display: flex; align-items: center; justify-content: space-between; }
+.memo-head h2 { margin: 0; }
+.memo textarea { margin-top: 8px; }
+.star-btn { margin: 6px 0; }
+#feedback .star-btn { width: auto; }
+.exam-modes { grid-template-columns: 1fr 1fr; }
+.exam-mode[data-mode="jitsugi"] { grid-column: 1 / -1; }

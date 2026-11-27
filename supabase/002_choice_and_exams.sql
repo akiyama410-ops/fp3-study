@@ -14,7 +14,7 @@ alter table public.questions add constraint questions_kind_check check (kind in 
 create table if not exists public.exam_results (
   user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
   id uuid not null,
-  mode text not null check (mode in ('full', 'mini')),
+  mode text not null,
   total int not null,
   correct int not null,
   passed boolean not null,
@@ -23,6 +23,10 @@ create table if not exists public.exam_results (
   finished_at timestamptz not null default now(),
   primary key (user_id, id)
 );
+
+-- 試験の種類：本番形式・ミニ模試・実技模試
+alter table public.exam_results drop constraint if exists exam_results_mode_check;
+alter table public.exam_results add constraint exam_results_mode_check check (mode in ('full', 'mini', 'jitsugi'));
 
 alter table public.exam_results enable row level security;
 drop policy if exists "own rows" on public.exam_results;
