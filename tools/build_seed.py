@@ -122,7 +122,7 @@ def build(src: Path) -> dict:
 
 def check_extra(q: dict, mids: set) -> dict:
     base = {k: q[k] for k in ("id", "material_id", "sort", "text", "explanation")}
-    if q["material_id"] not in mids:
+    if q["material_id"] not in mids and not str(q["material_id"]).startswith("jitsugi-"):
         raise ValueError(f"{q['id']}: unknown material")
     if q.get("kind") == "choice":
         if len(q["choices"]) != 3 or q["answer_index"] not in (0, 1, 2):
