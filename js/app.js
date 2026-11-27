@@ -115,11 +115,12 @@ async function render() {
   else if (page === "plan") current = planView();
   else if (page === "admin") current = adminView(ctx);
   else if (page === "listen") current = await listenView(ctx);
+  else if (page === "exam") current = examView(a);
   else current = homeView();
 }
 
 function setActiveNav(page) {
-  const map = { home: "home", fields: "fields", field: "fields", m: "fields", quiz: "fields", record: "record", plan: "plan", admin: "admin", listen: "listen" };
+  const map = { home: "home", fields: "fields", field: "fields", m: "fields", quiz: "fields", record: "record", plan: "plan", admin: "admin", listen: "listen", exam: "fields" };
   for (const a of nav.querySelectorAll("a")) a.classList.toggle("active", a.dataset.nav === map[page]);
   updateMini();
 }
@@ -255,6 +256,14 @@ function homeView() {
       ${wrong ? `<a class="btn" href="#/quiz/wrong">まちがえた問題を解き直す（${wrong}問）</a>` : ""}
     </section>
     <section class="card">
+      <h2>📝 模擬試験</h2>
+      ${(() => {
+        const last = [...state.exams].sort((a, b) => (a.finished_at < b.finished_at ? 1 : -1))[0];
+        return last ? `<p>前回：${last.correct} / ${last.total}問 ${last.passed ? `<span class="ok">合格</span>` : `<span class="ng">不合格</span>`}</p>` : `<p class="muted">本番と同じ形（60問・90分）とミニ模試（20問・30分）で力だめし。</p>`;
+      })()}
+      <a class="btn primary" href="#/exam">模擬試験を受ける</a>
+    </section>
+    <section class="card">
       <h2>分野ごとの進み具合</h2>
       <ul class="list">
         ${FIELDS.map((f) => {
@@ -288,7 +297,7 @@ function fieldsView() {
     return { live: true };
   }
   view.innerHTML = `
-    <div class="toolbar"><a class="btn" href="#/quiz/all">ランダムに20問</a><a class="btn" href="#/quiz/wrong">まちがえた問題</a></div>
+    <div class="toolbar"><a class="btn primary" href="#/exam">📝 模擬試験</a><a class="btn" href="#/quiz/all">ランダムに20問</a><a class="btn" href="#/quiz/wrong">まちがえた問題</a></div>
     ${FIELDS.map((f) => {
       const ms = S.materialsOf(f.key);
       if (!ms.length) return "";
@@ -616,12 +625,35 @@ function quizPanel(panel, m) {
       .map((q) => {
         const a = latest[q.id];
         const mark = a ? (a.correct ? `<span class="ok">○ 正解</span>` : `<span class="ng">× 不正解</span>`) : `<span class="muted">未解答</span>`;
-        return `<li>${esc(q.text)} ${mark}</li>`;
+        return `<li>${q.kind === "choice" ? `<span class="tag">三択</span>` : ""}${esc(q.text)} ${mark}</li>`;
       })
       .join("")}</ol>`;
 }
 
-// ===== ○×問題 =====
+// ===== ○×問題・三択問題 =====
+const NUM = ["1", "2", "3"];
+function answerButtons(q, selected) {
+  if (q.kind === "choice") {
+    return `<div class="choice-btns">${(q.choices || [])
+      .map((c, k) => `<button class="btn ans choice ${selected === String(k) ? "sel" : ""}" data-a="${k}"><span class="num">${NUM[k]}</span><span>${esc(c)}</span></button>`)
+      .join("")}</div>`;
+  }
+  return `<div class="answer-btns"><button class="btn ans ${selected === "1" ? "sel" : ""}" data-a="1">○</button><button class="btn ans ${selected === "0" ? "sel" : ""}" data-a="0">×</button></div>`;
+}
+function isCorrect(q, value) {
+  if (value == null) return false;
+  if (q.kind === "choice") return Number(value) === Number(q.answer_index);
+  return (value === "1") === q.answer;
+}
+function answerLabel(q) {
+  if (q.kind === "choice") return `${NUM[q.answer_index]}. ${(q.choices || [])[q.answer_index] || ""}`;
+  return q.answer ? "○" : "×";
+}
+function valueLabel(q, value) {
+  if (value == null) return "未解答";
+  if (q.kind === "choice") return `${NUM[value]}. ${(q.choices || [])[value] || ""}`;
+  return value === "1" ? "○" : "×";
+}
 function quizView(scope = "all") {
   let list = [];
   let title = "";
@@ -686,19 +718,18 @@ function quizView(scope = "all") {
         <div class="muted">${esc(title)} ・ ${i + 1} / ${list.length}${m && !scope.startsWith("m") ? ` ・ ${esc(m.title)}` : ""}</div>
         ${bar(i / list.length)}
         <p class="question">${esc(q.text)}</p>
-        <div class="answer-btns"><button class="btn ans" data-a="1">○</button><button class="btn ans" data-a="0">×</button></div>
+        ${answerButtons(q)}
         <div id="feedback"></div>
       </section>`;
     view.querySelectorAll(".ans").forEach((b) =>
       b.addEventListener("click", async () => {
-        const choice = b.dataset.a === "1";
-        const correct = choice === q.answer;
+        const correct = isCorrect(q, b.dataset.a);
         if (correct) score += 1;
         else missed.push(q);
         view.querySelectorAll(".ans").forEach((x) => { x.disabled = true; });
         b.classList.add(correct ? "right" : "wrong");
         view.querySelector("#feedback").innerHTML = `
-          <p class="verdict ${correct ? "ok" : "ng"}">${correct ? "正解！" : "不正解…"}　答えは「${q.answer ? "○" : "×"}」</p>
+          <p class="verdict ${correct ? "ok" : "ng"}">${correct ? "正解！" : "不正解…"}　答えは「${esc(answerLabel(q))}」</p>
           <p class="explain">${esc(q.explanation)}</p>
           <button class="btn primary" id="next">${i + 1 < list.length ? "次の問題へ" : "結果を見る"}</button>`;
         view.querySelector("#next").addEventListener("click", () => { i += 1; draw(); window.scrollTo(0, 0); });
@@ -714,6 +745,294 @@ function quizView(scope = "all") {
       activeTimers.delete(timer);
     },
   };
+}
+
+// ===== 模擬試験 =====
+const EXAM = {
+  full: { label: "本番形式", total: 60, ox: 30, choice: 30, minutes: 90, pass: 36 },
+  mini: { label: "ミニ模試", total: 20, ox: 10, choice: 10, minutes: 30, pass: 12 },
+};
+const EXAM_KEY = "fp3-exam";
+const EXAM_LAST_KEY = "fp3-exam-last";
+function loadJson(key) {
+  try {
+    return JSON.parse(localStorage.getItem(key) || "null");
+  } catch (_) {
+    return null;
+  }
+}
+function saveJson(key, v) {
+  try {
+    if (v == null) localStorage.removeItem(key);
+    else localStorage.setItem(key, JSON.stringify(v));
+  } catch (_) {}
+}
+
+// 6分野から、なるべく同じ数ずつ選ぶ
+function spread(n) {
+  const base = Math.floor(n / FIELDS.length);
+  const counts = Object.fromEntries(FIELDS.map((f) => [f.key, base]));
+  for (const f of shuffle(FIELDS).slice(0, n - base * FIELDS.length)) counts[f.key] += 1;
+  return counts;
+}
+function pickExam(mode) {
+  const cfg = EXAM[mode];
+  const byKind = (kind) => state.questions.filter((q) => (q.kind || "ox") === kind);
+  const pick = (pool, n) => {
+    const counts = spread(n);
+    let out = [];
+    for (const f of FIELDS) out = out.concat(shuffle(pool.filter((q) => S.fieldOfMaterial(q.material_id) === f.key)).slice(0, counts[f.key]));
+    if (out.length < n) {
+      const rest = shuffle(pool.filter((q) => !out.includes(q)));
+      out = out.concat(rest.slice(0, n - out.length));
+    }
+    return shuffle(out);
+  };
+  const choice = pick(byKind("choice"), cfg.choice);
+  // 三択が足りないときは○×で補う
+  const ox = pick(byKind("ox"), cfg.ox + (cfg.choice - choice.length));
+  return [...ox, ...choice].map((q) => q.id);
+}
+
+function examView(sub) {
+  const active = loadJson(EXAM_KEY);
+  if (sub === "run") return examRun();
+  if (sub === "result") return examResult();
+  const hasChoice = state.questions.some((q) => q.kind === "choice");
+  const history = [...state.exams].sort((a, b) => (a.finished_at < b.finished_at ? 1 : -1)).slice(0, 10);
+  view.innerHTML = `
+    <a class="back" href="#/fields">‹ 教材一覧</a>
+    <section class="card">
+      <h1>📝 模擬試験</h1>
+      <p class="note">FP3級の学科試験と同じく、前半が○×問題、後半が三択問題です。6分野からかたよりなく出題し、時間になると自動で採点します。</p>
+      ${hasChoice ? "" : `<p class="note err">三択問題がまだ入っていないため、今は○×問題だけで出題します。</p>`}
+      ${
+        active
+          ? `<div class="resume"><p><strong>${esc(EXAM[active.mode].label)}</strong>の途中です（${Object.keys(active.answers).length} / ${active.ids.length}問 解答済み）</p>
+             <div class="toolbar"><a class="btn primary" href="#/exam/run">続きから解く</a><button class="btn" id="abandon">やめる</button></div></div>`
+          : `<div class="exam-modes">
+              ${["full", "mini"]
+                .map((k) => {
+                  const c = EXAM[k];
+                  return `<button class="exam-mode" data-mode="${k}"><strong>${esc(c.label)}</strong><span>${c.total}問・${c.minutes}分</span><small>${c.pass}問以上で合格</small></button>`;
+                })
+                .join("")}
+            </div>`
+      }
+    </section>
+    <section class="card">
+      <h2>これまでの結果</h2>
+      ${
+        history.length
+          ? `<table class="table"><thead><tr><th>日時</th><th>種類</th><th>点数</th><th></th></tr></thead><tbody>${history
+              .map(
+                (r) => `<tr><td>${esc(new Date(r.finished_at).toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }))}</td>
+                  <td>${esc((EXAM[r.mode] || {}).label || r.mode)}</td><td>${r.correct} / ${r.total}</td>
+                  <td>${r.passed ? `<span class="ok">合格</span>` : `<span class="ng">不合格</span>`}</td></tr>`,
+              )
+              .join("")}</tbody></table>`
+          : `<p class="muted">まだ受けていません。</p>`
+      }
+      ${state.examsReady ? "" : `<p class="note">※保管庫の追加の設定がまだなので、結果はこの端末だけに保存されます（設定後、自動で保管庫に送られます）。</p>`}
+    </section>`;
+  view.querySelectorAll("[data-mode]").forEach((b) =>
+    b.addEventListener("click", () => {
+      const mode = b.dataset.mode;
+      const ids = pickExam(mode);
+      if (!ids.length) {
+        toast("問題がありません。先に教材データを取り込んでください");
+        return;
+      }
+      const now = Date.now();
+      saveJson(EXAM_KEY, { mode, ids, answers: {}, flags: {}, cur: 0, startedAt: now, deadline: now + EXAM[mode].minutes * 60000 });
+      location.hash = "#/exam/run";
+    }),
+  );
+  const ab = view.querySelector("#abandon");
+  if (ab) ab.addEventListener("click", () => {
+    if (!confirm("途中の模擬試験をやめますか？（解答は記録されません）")) return;
+    saveJson(EXAM_KEY, null);
+    render();
+  });
+  return { live: true };
+}
+
+function examRun() {
+  const ex = loadJson(EXAM_KEY);
+  if (!ex) {
+    location.hash = "#/exam";
+    return { live: false };
+  }
+  const cfg = EXAM[ex.mode];
+  const qmap = Object.fromEntries(state.questions.map((q) => [q.id, q]));
+  const qs = ex.ids.map((id) => qmap[id]).filter(Boolean);
+  const timer = new Timer("exam", 3 * 3600);
+  timer.pauseOnHide = true;
+  activeTimers.add(timer);
+  timer.start();
+  let showGrid = false;
+  const persist = () => saveJson(EXAM_KEY, ex);
+
+  const remaining = () => Math.max(0, Math.round((ex.deadline - Date.now()) / 1000));
+  const draw = () => {
+    const i = Math.min(ex.cur, qs.length - 1);
+    const q = qs[i];
+    const answered = Object.keys(ex.answers).length;
+    const part = q.kind === "choice" ? "三択問題" : "○×問題";
+    view.innerHTML = `
+      <div class="exam-head">
+        <span>${esc(cfg.label)}</span>
+        <span id="clock" class="clock">${fmtTime(remaining())}</span>
+        <button class="btn small" id="grid-btn">${showGrid ? "問題にもどる" : `一覧（${answered}/${qs.length}）`}</button>
+      </div>
+      ${
+        showGrid
+          ? `<section class="card"><p class="note">番号を押すとその問題へ。緑＝解答済み、★＝見直し。</p>
+             <div class="qgrid">${qs
+               .map((x, k) => `<button class="qcell ${ex.answers[x.id] != null ? "done" : ""} ${k === i ? "cur" : ""}" data-go="${k}">${k + 1}${ex.flags[x.id] ? "★" : ""}</button>`)
+               .join("")}</div></section>`
+          : `<section class="card quiz">
+              <div class="muted">${part} ・ ${i + 1} / ${qs.length}</div>
+              ${bar(answered / qs.length)}
+              <p class="question">${esc(q.text)}</p>
+              ${answerButtons(q, ex.answers[q.id])}
+              <label class="check flag"><input type="checkbox" id="flag" ${ex.flags[q.id] ? "checked" : ""}> ★ あとで見直す</label>
+              <div class="exam-nav">
+                <button class="btn" id="prev" ${i === 0 ? "disabled" : ""}>‹ 前へ</button>
+                ${i + 1 < qs.length ? `<button class="btn primary" id="next">次へ ›</button>` : `<button class="btn primary" id="submit2">提出する</button>`}
+              </div>
+            </section>`
+      }
+      <button class="btn wide" id="submit">提出して採点する</button>`;
+    view.querySelector("#grid-btn").addEventListener("click", () => { showGrid = !showGrid; draw(); });
+    view.querySelector("#submit").addEventListener("click", () => submit(false));
+    if (showGrid) {
+      view.querySelectorAll("[data-go]").forEach((b) => b.addEventListener("click", () => {
+        ex.cur = Number(b.dataset.go);
+        showGrid = false;
+        persist();
+        draw();
+      }));
+      return;
+    }
+    view.querySelectorAll(".ans").forEach((b) => b.addEventListener("click", () => {
+      ex.answers[q.id] = b.dataset.a;
+      persist();
+      view.querySelectorAll(".ans").forEach((x) => x.classList.toggle("sel", x === b));
+    }));
+    view.querySelector("#flag").addEventListener("change", (e) => {
+      if (e.target.checked) ex.flags[q.id] = true;
+      else delete ex.flags[q.id];
+      persist();
+    });
+    view.querySelector("#prev").addEventListener("click", () => { ex.cur = i - 1; persist(); draw(); window.scrollTo(0, 0); });
+    const nx = view.querySelector("#next");
+    if (nx) nx.addEventListener("click", () => { ex.cur = i + 1; persist(); draw(); window.scrollTo(0, 0); });
+    const s2 = view.querySelector("#submit2");
+    if (s2) s2.addEventListener("click", () => submit(false));
+  };
+
+  let done = false;
+  const submit = async (timeUp) => {
+    if (done) return;
+    const unanswered = qs.length - Object.keys(ex.answers).length;
+    if (!timeUp && !confirm(unanswered ? `まだ${unanswered}問 解答していません。提出して採点しますか？` : "提出して採点しますか？")) return;
+    done = true;
+    clearInterval(tick);
+    timer.stop();
+    const byField = {};
+    let correct = 0;
+    for (const q of qs) {
+      const f = S.fieldOfMaterial(q.material_id) || "other";
+      byField[f] = byField[f] || { c: 0, t: 0 };
+      byField[f].t += 1;
+      const v = ex.answers[q.id];
+      const ok = isCorrect(q, v);
+      if (ok) {
+        correct += 1;
+        byField[f].c += 1;
+      }
+      if (v != null) await D.addAttempt(q.id, ok);
+    }
+    const total = qs.length;
+    const passLine = Math.ceil((cfg.pass / cfg.total) * total);
+    const result = {
+      mode: ex.mode,
+      total,
+      correct,
+      passed: correct >= passLine,
+      by_field: byField,
+      duration_sec: Math.round((Math.min(Date.now(), ex.deadline) - ex.startedAt) / 1000),
+    };
+    saveJson(EXAM_LAST_KEY, { ...result, ids: ex.ids, answers: ex.answers, timeUp: !!timeUp });
+    saveJson(EXAM_KEY, null);
+    await D.addExamResult(result);
+    location.hash = "#/exam/result";
+  };
+
+  const tick = setInterval(() => {
+    const r = remaining();
+    const c = document.getElementById("clock");
+    if (c) {
+      c.textContent = fmtTime(r);
+      c.classList.toggle("warn", r <= 300);
+    }
+    if (r <= 0) {
+      toast("時間になりました。採点します");
+      submit(true);
+    }
+  }, 1000);
+  if (remaining() <= 0) setTimeout(() => submit(true), 0);
+  draw();
+  return {
+    live: false,
+    cleanup() {
+      clearInterval(tick);
+      timer.stop();
+      activeTimers.delete(timer);
+    },
+  };
+}
+
+function examResult() {
+  const r = loadJson(EXAM_LAST_KEY);
+  if (!r) {
+    location.hash = "#/exam";
+    return { live: false };
+  }
+  const cfg = EXAM[r.mode];
+  const qmap = Object.fromEntries(state.questions.map((q) => [q.id, q]));
+  const qs = r.ids.map((id) => qmap[id]).filter(Boolean);
+  const wrong = qs.filter((q) => !isCorrect(q, r.answers[q.id]));
+  view.innerHTML = `
+    <a class="back" href="#/exam">‹ 模擬試験</a>
+    <section class="card result">
+      <h1>${esc(cfg.label)}の結果</h1>
+      ${r.timeUp ? `<p class="note">時間切れのため、自動で採点しました。</p>` : ""}
+      <p class="big">${r.correct} / ${r.total} 問正解</p>
+      <p class="verdict ${r.passed ? "ok" : "ng"}">${r.passed ? "合格ライン突破！🎉" : "あと少し！"}（合格ライン ${Math.ceil((cfg.pass / cfg.total) * r.total)}問）</p>
+      ${bar(r.correct / r.total)}
+      <p class="muted">かかった時間：${fmtTime(r.duration_sec)}</p>
+    </section>
+    <section class="card">
+      <h2>分野ごとの成績</h2>
+      <table class="table"><tbody>${FIELDS.filter((f) => r.by_field[f.key])
+        .map((f) => {
+          const b = r.by_field[f.key];
+          return `<tr><td><span class="dot" style="background:${f.color}"></span>${esc(f.short)}</td><td>${b.c} / ${b.t}</td><td style="width:40%">${bar(b.c / b.t, f.color)}</td></tr>`;
+        })
+        .join("")}</tbody></table>
+    </section>
+    <section class="card">
+      <h2>まちがえた問題（${wrong.length}問）</h2>
+      ${wrong.length ? `<a class="btn primary" href="#/quiz/wrong">まちがえた問題を解き直す</a>` : `<p>全問正解です！</p>`}
+      <ol class="review">${wrong
+        .map((q) => `<li><p>${esc(q.text)}</p>
+          <p class="small">あなたの答え：<span class="ng">${esc(valueLabel(q, r.answers[q.id]))}</span> ／ 正解：<span class="ok">${esc(answerLabel(q))}</span></p>
+          <p class="explain">${esc(q.explanation)}</p></li>`)
+        .join("")}</ol>
+    </section>`;
+  return { live: false };
 }
 
 // ===== 記録 =====

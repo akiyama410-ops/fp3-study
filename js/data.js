@@ -8,7 +8,7 @@ export const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
 });
 
 const DEFAULT_EXAM = "2027-01-31";
-const KEYS = ["materials", "questions", "media", "settings", "progress", "attempts", "logs", "queue", "lastSync"];
+const KEYS = ["materials", "questions", "media", "settings", "progress", "attempts", "logs", "exams", "queue", "lastSync"];
 
 export const state = {
   user: null,
@@ -19,6 +19,8 @@ export const state = {
   progress: {},
   attempts: [],
   logs: [],
+  exams: [], // 模擬試験の結果
+  examsReady: true, // 保管庫に模擬試験の表があるか（追加の設定をしたか）
   queue: [],
   lastSync: null,
   syncing: false,
@@ -133,6 +135,7 @@ const PK = {
   quiz_attempts: "user_id,id",
   study_logs: "user_id,id",
   settings: "user_id",
+  exam_results: "user_id,id",
 };
 
 function enqueue(table, row) {
@@ -181,6 +184,14 @@ async function pull() {
     selectAll("study_logs", "created_at"),
     selectAll("settings"),
   ]);
+  // 模擬試験の表は追加の設定（002_choice_and_exams.sql）を実行するまで無いので、無くても止めない
+  let exams = null;
+  try {
+    exams = await selectAll("exam_results", "finished_at");
+    state.examsReady = true;
+  } catch (e) {
+    state.examsReady = false;
+  }
   state.materials = materials.map(({ user_id, ...m }) => m);
   state.questions = questions.map(({ user_id, ...q }) => q);
   state.media = media.map(({ user_id, ...m }) => m);
@@ -189,8 +200,19 @@ async function pull() {
   state.attempts = attempts.map(({ user_id, ...a }) => a);
   state.logs = logs.map(({ user_id, ...l }) => l);
   if (settings[0]) state.settings = { exam_date: settings[0].exam_date };
+  if (exams) {
+    // 設定の追加前にこの端末だけに保存していた結果があれば、保管庫に送る
+    const ids = new Set(exams.map((x) => x.id));
+    const localOnly = state.exams.filter((x) => !ids.has(x.id));
+    for (const x of localOnly) enqueue("exam_results", x);
+    state.exams = [...exams.map(({ user_id, ...x }) => x), ...localOnly];
+    if (localOnly.length) {
+      await save("queue");
+      schedulePush();
+    }
+  }
   state.lastSync = new Date().toISOString();
-  await save("materials", "questions", "media", "progress", "attempts", "logs", "settings", "lastSync");
+  await save("materials", "questions", "media", "progress", "attempts", "logs", "exams", "settings", "lastSync");
 }
 
 let syncPromise = null;
@@ -269,6 +291,15 @@ export async function addStudy(seconds, source) {
   schedulePush();
 }
 
+export async function addExamResult(row) {
+  const full = { id: uuid(), finished_at: new Date().toISOString(), ...row };
+  state.exams.push(full);
+  if (state.examsReady) enqueue("exam_results", full);
+  await save("exams", "queue");
+  schedulePush();
+  emit();
+}
+
 export async function saveSettings(patch) {
   state.settings = { ...state.settings, ...patch };
   enqueue("settings", { ...state.settings, updated_at: new Date().toISOString() });
@@ -299,16 +330,29 @@ export async function importSeed(seed) {
     material_id: String(q.material_id),
     sort: Number(q.sort),
     text: String(q.text),
-    answer: Boolean(q.answer),
     explanation: String(q.explanation || ""),
+    ...(q.kind === "choice"
+      ? { kind: "choice", answer: null, choices: (q.choices || []).map(String), answer_index: Number(q.answer_index) }
+      : { kind: "ox", answer: Boolean(q.answer) }),
   }));
+  const hasChoice = qs.some((q) => q.kind === "choice");
+  if (hasChoice && !state.examsReady) {
+    throw new Error("三択問題を入れるには、先に保管庫の追加の設定（002_choice_and_exams.sql）を実行してください");
+  }
+  // 三択がないデータは、追加の設定の前でも入るように「kind」を送らない
+  if (!hasChoice) for (const q of qs) delete q.kind;
   for (let i = 0; i < mats.length; i += 5) {
     const { error } = await sb.from("materials").upsert(mats.slice(i, i + 5), { onConflict: "user_id,id" });
     if (error) throw error;
   }
   for (let i = 0; i < qs.length; i += 100) {
     const { error } = await sb.from("questions").upsert(qs.slice(i, i + 100), { onConflict: "user_id,id" });
-    if (error) throw error;
+    if (error) {
+      if (hasChoice && /kind|choices|answer_index|column/i.test(error.message || "")) {
+        throw new Error("三択問題を入れるには、先に保管庫の追加の設定（002_choice_and_exams.sql）を実行してください");
+      }
+      throw error;
+    }
   }
   await resync();
   return { materials: mats.length, questions: qs.length };
