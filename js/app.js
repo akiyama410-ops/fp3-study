@@ -574,11 +574,18 @@ async function slidesPanel(panel, m, ctx) {
   panel.innerHTML = "";
   panel.appendChild(doneButton(m.id, "slides", "見た", "見たらチェック"));
   await storageLine(panel, m, "slides", () => render());
+  const fsBtn = document.createElement("button");
+  fsBtn.className = "btn fs-open";
+  fsBtn.textContent = "⛶ 全画面で見る";
+  fsBtn.hidden = true;
+  panel.appendChild(fsBtn);
   const holder = document.createElement("div");
   holder.className = "slides";
   holder.textContent = "読み込み中…";
   panel.appendChild(holder);
   let objectUrl = null;
+  let pdf = null;
+  let viewer = null;
   try {
     const local = await D.localMedia(m.id, "slides");
     let blob = local ? local.blob : null;
@@ -594,10 +601,13 @@ async function slidesPanel(panel, m, ctx) {
       const img = document.createElement("img");
       img.src = objectUrl;
       img.alt = m.title;
+      img.addEventListener("click", () => openViewer(0));
       holder.appendChild(img);
+      fsBtn.hidden = false;
     } else {
       const pdfjs = await loadPdfJs();
-      const pdf = await pdfjs.getDocument({ data: new Uint8Array(await blob.arrayBuffer()) }).promise;
+      pdf = await pdfjs.getDocument({ data: new Uint8Array(await blob.arrayBuffer()) }).promise;
+      fsBtn.hidden = false;
       const width = holder.clientWidth || 360;
       for (let i = 1; i <= pdf.numPages; i += 1) {
         if (!ctx.alive()) break;
@@ -609,6 +619,8 @@ async function slidesPanel(panel, m, ctx) {
         canvas.width = vp.width;
         canvas.height = vp.height;
         canvas.style.width = "100%";
+        canvas.title = "押すと全画面で見られます";
+        canvas.addEventListener("click", () => openViewer(i - 1));
         holder.appendChild(canvas);
         await page.render({ canvasContext: canvas.getContext("2d"), viewport: vp }).promise;
       }
@@ -616,9 +628,131 @@ async function slidesPanel(panel, m, ctx) {
   } catch (err) {
     holder.textContent = err.message;
   }
+
+  // ===== 全画面（1枚ずつ） =====
+  function openViewer(start) {
+    if (viewer) return;
+    const total = pdf ? pdf.numPages : 1;
+    let index = Math.min(Math.max(0, start), total - 1);
+    let renderTask = null;
+    let drawn = 0;
+    const el = document.createElement("div");
+    el.className = "slide-viewer";
+    el.setAttribute("role", "dialog");
+    el.setAttribute("aria-label", `${m.title} のスライド`);
+    el.innerHTML = `
+      <div class="sv-bar"><span class="sv-count" aria-live="polite"></span><button class="sv-close" aria-label="全画面を閉じる">✕ 閉じる</button></div>
+      <div class="sv-stage"></div>
+      <button class="sv-nav sv-prev" aria-label="前のページ">‹</button>
+      <button class="sv-nav sv-next" aria-label="次のページ">›</button>`;
+    const stage = el.querySelector(".sv-stage");
+    const count = el.querySelector(".sv-count");
+    const prevBtn = el.querySelector(".sv-prev");
+    const nextBtn = el.querySelector(".sv-next");
+    const show = async () => {
+      count.textContent = `${index + 1} / ${total}`;
+      prevBtn.disabled = index === 0;
+      nextBtn.disabled = index === total - 1;
+      const my = ++drawn;
+      const w = stage.clientWidth;
+      const h = stage.clientHeight;
+      if (!pdf) {
+        stage.innerHTML = "";
+        const img = document.createElement("img");
+        img.src = objectUrl;
+        img.alt = m.title;
+        stage.appendChild(img);
+        return;
+      }
+      if (renderTask) renderTask.cancel();
+      const page = await pdf.getPage(index + 1);
+      if (my !== drawn || !viewer) return;
+      const vp1 = page.getViewport({ scale: 1 });
+      const fit = Math.min(w / vp1.width, h / vp1.height);
+      const dpr = window.devicePixelRatio || 1;
+      const vp = page.getViewport({ scale: fit * dpr });
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.floor(vp.width);
+      canvas.height = Math.floor(vp.height);
+      canvas.style.width = `${Math.floor(vp1.width * fit)}px`;
+      canvas.style.height = `${Math.floor(vp1.height * fit)}px`;
+      renderTask = page.render({ canvasContext: canvas.getContext("2d"), viewport: vp });
+      try {
+        await renderTask.promise;
+      } catch {
+        return; // ページを急いでめくったときは、途中の描画を捨てる
+      }
+      if (my !== drawn) return;
+      stage.innerHTML = "";
+      stage.appendChild(canvas);
+    };
+    const go = (d) => {
+      const n = index + d;
+      if (n < 0 || n >= total) return;
+      index = n;
+      show();
+    };
+    const onKey = (e) => {
+      if (e.key === "ArrowRight" || e.key === "ArrowDown" || e.key === " " || e.key === "PageDown") { e.preventDefault(); go(1); }
+      else if (e.key === "ArrowLeft" || e.key === "ArrowUp" || e.key === "PageUp") { e.preventDefault(); go(-1); }
+      else if (e.key === "Escape") close();
+    };
+    let resizeTimer = null;
+    const onResize = () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(show, 150); };
+    const onFsChange = () => { if (!document.fullscreenElement && viewer) close(); };
+    let sx = null;
+    let sy = null;
+    stage.addEventListener("touchstart", (e) => {
+      if (e.touches.length !== 1) { sx = null; return; }
+      sx = e.touches[0].clientX;
+      sy = e.touches[0].clientY;
+    }, { passive: true });
+    stage.addEventListener("touchend", (e) => {
+      if (sx == null) return;
+      const dx = e.changedTouches[0].clientX - sx;
+      const dy = e.changedTouches[0].clientY - sy;
+      sx = null;
+      if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy)) go(dx < 0 ? 1 : -1);
+    });
+    // 画面の右側を押すと次、左側を押すと前（パソコンのクリックでも使える）
+    stage.addEventListener("click", (e) => {
+      const r = stage.getBoundingClientRect();
+      go(e.clientX - r.left > r.width / 2 ? 1 : -1);
+    });
+    prevBtn.addEventListener("click", () => go(-1));
+    nextBtn.addEventListener("click", () => go(1));
+    el.querySelector(".sv-close").addEventListener("click", () => close());
+    function close() {
+      if (!viewer) return;
+      viewer = null;
+      if (renderTask) renderTask.cancel();
+      clearTimeout(resizeTimer);
+      document.removeEventListener("keydown", onKey);
+      window.removeEventListener("resize", onResize);
+      document.removeEventListener("fullscreenchange", onFsChange);
+      if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+      document.body.classList.remove("no-scroll");
+      el.remove();
+      fsBtn.focus({ preventScroll: true });
+    }
+    viewer = { close };
+    document.body.appendChild(el);
+    document.body.classList.add("no-scroll");
+    document.addEventListener("keydown", onKey);
+    window.addEventListener("resize", onResize);
+    // パソコン・iPadでは本当の全画面にする（iPhoneはできないので、アプリの画面いっぱいに広げる）
+    if (el.requestFullscreen) {
+      el.requestFullscreen().then(() => document.addEventListener("fullscreenchange", onFsChange)).catch(() => {});
+    }
+    el.querySelector(".sv-close").focus({ preventScroll: true });
+    show();
+  }
+  fsBtn.addEventListener("click", () => openViewer(0));
+
   return () => {
     timer.stop();
     activeTimers.delete(timer);
+    if (viewer) viewer.close();
     if (objectUrl) URL.revokeObjectURL(objectUrl);
   };
 }
