@@ -186,6 +186,11 @@ video.video { width: 100%; border-radius: 10px; background: #000; }
 .table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
 .table th, .table td { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--line); vertical-align: top; }
 .table.small { font-size: 0.8rem; }
+.link-btn.alt { color: var(--primary); }
+.visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); border: 0; }
+.media-table td.drop { min-width: 64px; transition: background 0.15s; }
+.media-table td.drop.over { background: var(--chip); outline: 2px dashed var(--primary); outline-offset: -2px; }
+.media-table .add-btn { min-height: 30px; padding: 2px 8px; font-size: 0.75rem; white-space: nowrap; }
 .table .fname { display: block; font-weight: 600; overflow-wrap: anywhere; word-break: break-all; }
 .plan { list-style: none; padding: 0; margin: 0; }
 .plan-day { font-weight: 700; margin-top: 10px; }

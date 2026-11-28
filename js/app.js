@@ -1342,6 +1342,10 @@ function planView() {
 }
 
 // ===== 管理 =====
+// ファイルを欄の外に落としても、ブラウザがそのファイルを開いてアプリから離れないようにする
+window.addEventListener("dragover", (e) => e.preventDefault());
+window.addEventListener("drop", (e) => e.preventDefault());
+
 function adminView(ctx) {
   const draw = async () => {
     if (!ctx.alive()) return;
@@ -1354,6 +1358,7 @@ function adminView(ctx) {
     }
     if (!ctx.alive()) return;
     const mats = S.sortedMaterials();
+    const canDrop = matchMedia("(hover: hover) and (pointer: fine)").matches;
     view.innerHTML = `
       <section class="card">
         <h2>アカウント</h2>
@@ -1370,36 +1375,28 @@ function adminView(ctx) {
       </section>
 
       <section class="card">
-        <h2>ファイルのアップロード</h2>
+        <h2>音声・動画・スライド</h2>
         <p>保管庫の使用量：<strong>${mb(used)}</strong> / ${mb(STORAGE_LIMIT)}（残り ${mb(Math.max(0, STORAGE_LIMIT - used))}）</p>
         ${bar(used / STORAGE_LIMIT, used > STORAGE_LIMIT * 0.9 ? "#c53030" : undefined)}
-        <p class="note">1ファイル50MBまで。家族カレンダーのプロジェクトと容量を分け合うので、少し余裕を残しておきましょう。</p>
-        <form id="up-form" class="stack">
-          <label>教材<select id="up-mat"><optgroup label="教材">${mats.map((m) => `<option value="${esc(m.id)}">${esc(m.title)}</option>`).join("")}</optgroup>
-            <optgroup label="分野のまとめ（スライドだけ）">${FIELDS.map((f) => `<option value="field-${f.key}">【まとめ】${esc(f.name)}</option>`).join("")}</optgroup></select></label>
-          <label>種類<select id="up-kind"><option value="audio">音声</option><option value="video">動画</option><option value="slides">スライド（PDF・画像）</option></select></label>
-          <label class="file">ファイルを選ぶ<input type="file" id="up-file"></label>
-          <button class="btn primary" type="submit">アップロード</button>
-          <p class="note" id="up-msg"></p>
-        </form>
-      </section>
-
-      <section class="card">
-        <h2>アップロード済みのファイル</h2>
-        <table class="table small"><thead><tr><th>教材</th><th>音声</th><th>動画</th><th>スライド</th></tr></thead><tbody>
+        <p class="note">入れたい欄の「＋追加」を押してファイルを選びます${canDrop ? "（パソコンでは、ファイルを欄の上に落としてもアップロードできます）" : ""}。1ファイル50MBまで。家族カレンダーのプロジェクトと容量を分け合うので、少し余裕を残しておきましょう。</p>
+        <p class="note" id="up-msg" role="status"></p>
+        <input type="file" id="up-file" class="visually-hidden" tabindex="-1" aria-hidden="true">
+        <table class="table small media-table"><thead><tr><th>教材</th><th>音声</th><th>動画</th><th>スライド</th></tr></thead><tbody>
         ${[...mats, ...FIELDS.map((f) => ({ id: `field-${f.key}`, title: `【まとめ】${f.name}` }))]
           .map(
             (m) => `<tr><td>${esc(m.title)}</td>${["audio", "video", "slides"]
               .map((k) => {
+                if (m.id.startsWith("field-") && k !== "slides") return `<td class="muted">—</td>`;
                 const md = D.mediaFor(m.id, k);
-                if (!md) return `<td class="muted">—</td>`;
-                return `<td><span class="fname">${esc(md.file_name || "（名前なし）")}</span>${mb(md.size_bytes)}${localKeys.has(`${m.id}:${k}`) ? " 📱" : ""}<br><button class="link-btn" data-del="${esc(m.id)}|${k}">削除</button></td>`;
+                const key = `${esc(m.id)}|${k}`;
+                if (!md) return `<td class="drop" data-drop="${key}"><button class="btn small add-btn" data-up="${key}">＋追加</button></td>`;
+                return `<td class="drop" data-drop="${key}" data-has="1"><span class="fname">${esc(md.file_name || "（名前なし）")}</span>${mb(md.size_bytes)}${localKeys.has(`${m.id}:${k}`) ? " 📱" : ""}<br><button class="link-btn alt" data-up="${key}">置きかえ</button>　<button class="link-btn" data-del="${key}">削除</button></td>`;
               })
               .join("")}</tr>`,
           )
           .join("")}
         </tbody></table>
-        <p class="note">📱 はこの端末に保存済みのしるしです。</p>
+        <p class="note">📱 はこの端末に保存済みのしるしです。分野のまとめには、スライド（PDF）だけ入れられます。</p>
       </section>
 
       <section class="card">
@@ -1433,35 +1430,63 @@ function adminView(ctx) {
       }
       draw();
     });
-    view.querySelector("#up-form").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const msg = view.querySelector("#up-msg");
-      const file = view.querySelector("#up-file").files[0];
-      const mid = view.querySelector("#up-mat").value;
-      const kind = view.querySelector("#up-kind").value;
-      if (!file) { msg.textContent = "ファイルを選んでください。"; return; }
+    const KIND_NAME = { audio: "音声", video: "動画", slides: "スライド" };
+    const ACCEPT = { audio: "audio/*,.m4a,.mp3,.wav,.aac", video: "video/*,.mp4,.mov,.m4v", slides: "application/pdf,image/*,.pdf,.png,.jpg,.jpeg" };
+    const msg = view.querySelector("#up-msg");
+    const input = view.querySelector("#up-file");
+    let target = null;
+    let busy = false;
+    const upload = async (mid, kind, file, askReplace) => {
+      if (busy) { msg.textContent = "いまアップロード中です。終わってからもう一度どうぞ。"; return; }
       if (file.size > FILE_LIMIT) { msg.textContent = `ファイルが大きすぎます（${mb(file.size)}）。50MB以下にしてください。`; return; }
       const type = file.type || "";
       const okType = kind === "audio" ? type.startsWith("audio/") || /\.(m4a|mp3|wav|aac)$/i.test(file.name)
         : kind === "video" ? type.startsWith("video/") || /\.(mp4|mov|m4v)$/i.test(file.name)
         : type === "application/pdf" || type.startsWith("image/") || /\.(pdf|png|jpe?g)$/i.test(file.name);
-      if (!okType) { msg.textContent = "選んだ種類とファイルの形式が合っていません。"; return; }
+      if (!okType) { msg.textContent = `「${file.name}」は${KIND_NAME[kind]}の欄には入れられません。欄と形式が合っているか確かめてください。`; return; }
       if (mid.startsWith("field-") && kind !== "slides") { msg.textContent = "分野のまとめには、スライド（PDF）だけアップロードできます。"; return; }
       const used = state.media.reduce((s, m) => s + Number(m.size_bytes || 0), 0);
       const old = D.mediaFor(mid, kind);
       if (used - (old ? old.size_bytes : 0) + file.size > STORAGE_LIMIT) { msg.textContent = "保管庫の容量が足りません。いらないファイルを削除してください。"; return; }
-      if (old && !confirm("この教材にはもうファイルがあります。置きかえますか？")) return;
-      const btn = e.target.querySelector("button[type=submit]");
-      btn.disabled = true;
-      msg.textContent = `アップロード中…（${mb(file.size)}）`;
+      if (old && askReplace && !confirm(`いまの「${old.file_name || "ファイル"}」を「${file.name}」に置きかえますか？`)) return;
+      busy = true;
+      const cell = view.querySelector(`[data-drop="${CSS.escape(`${mid}|${kind}`)}"]`);
+      if (cell) cell.innerHTML = `<span class="muted">アップロード中…<br>${esc(mb(file.size))}</span>`;
+      msg.textContent = `「${file.name}」をアップロード中…（${mb(file.size)}）`;
       try {
         await D.uploadMedia(mid, kind, file);
         toast("アップロードしました");
+        busy = false;
         draw();
       } catch (err) {
+        busy = false;
         msg.textContent = `アップロードできませんでした：${err.message}`;
-        btn.disabled = false;
+        draw();
       }
+    };
+    view.querySelectorAll("[data-up]").forEach((b) =>
+      b.addEventListener("click", () => {
+        target = b.dataset.up.split("|");
+        input.accept = ACCEPT[target[1]];
+        input.value = "";
+        input.click();
+      }),
+    );
+    input.addEventListener("change", () => {
+      const file = input.files[0];
+      if (file && target) upload(target[0], target[1], file, false);
+    });
+    view.querySelectorAll("[data-drop]").forEach((td) => {
+      td.addEventListener("dragover", (e) => { e.preventDefault(); td.classList.add("over"); });
+      td.addEventListener("dragleave", () => td.classList.remove("over"));
+      td.addEventListener("drop", (e) => {
+        e.preventDefault();
+        td.classList.remove("over");
+        const file = e.dataTransfer.files[0];
+        if (!file) return;
+        const [mid, kind] = td.dataset.drop.split("|");
+        upload(mid, kind, file, true);
+      });
     });
     view.querySelectorAll("[data-del]").forEach((b) =>
       b.addEventListener("click", async () => {
