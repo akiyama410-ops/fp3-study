@@ -59,7 +59,7 @@ SQL Editor で [`supabase/002_choice_and_exams.sql`](supabase/002_choice_and_exa
 1. パソコンで公開先を開き、メールアドレスでログイン（メールに届くコードを入れる）
 2. 1回ログインできたら、Supabase の **Authentication → Sign In / Providers** で **Allow new users to sign up** をオフにする（他の人が登録できないようにするため）
 3. 「管理」→「教材データ」で `fp3-seed.json` を取り込む
-4. 「管理」→「ファイルのアップロード」で、教材ごとに音声・動画・スライドをアップロード
+4. 「管理」→「音声・動画・スライド」の表で、入れたい欄の「＋追加」を押してアップロード（パソコンではファイルを欄に落としてもOK）
 
 ### 4. iPhoneで使う
 
