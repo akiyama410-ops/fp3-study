@@ -1393,7 +1393,7 @@ function adminView(ctx) {
               .map((k) => {
                 const md = D.mediaFor(m.id, k);
                 if (!md) return `<td class="muted">—</td>`;
-                return `<td>${mb(md.size_bytes)}${localKeys.has(`${m.id}:${k}`) ? " 📱" : ""}<br><button class="link-btn" data-del="${esc(m.id)}|${k}">削除</button></td>`;
+                return `<td><span class="fname">${esc(md.file_name || "（名前なし）")}</span>${mb(md.size_bytes)}${localKeys.has(`${m.id}:${k}`) ? " 📱" : ""}<br><button class="link-btn" data-del="${esc(m.id)}|${k}">削除</button></td>`;
               })
               .join("")}</tr>`,
           )
