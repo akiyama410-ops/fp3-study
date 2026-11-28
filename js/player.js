@@ -33,6 +33,7 @@ export const P = {
   sleepChoice: "", // 画面の選択欄に出す値
   error: "",
   loading: false,
+  single: false, // 教材ページから1つだけ流しているとき（次の音声には進まない）
 };
 
 // iPhone・iPad では Web から音量を変えられない（本体のボタンだけ）
@@ -94,13 +95,14 @@ async function sourceFor(mid) {
 }
 
 function nextIndex(i) {
+  if (P.single) return -1;
   if (i + 1 < P.queue.length) return i + 1;
   return P.repeat && P.queue.length ? 0 : -1;
 }
 
 let doneMarked = false;
 let loadToken = 0;
-async function loadIndex(i, autoplay) {
+async function loadIndex(i, autoplay, startSec = 0) {
   const token = ++loadToken;
   P.loading = true;
   P.error = "";
@@ -114,6 +116,12 @@ async function loadIndex(i, autoplay) {
       objectUrl = src.blob ? src.url : null;
       audio.src = src.url;
       audio.playbackRate = P.speed;
+      if (startSec > 5) {
+        // 前回の続きから（終わりの近くだったら最初から）
+        audio.addEventListener("loadedmetadata", () => {
+          if (token === loadToken && audio.duration && startSec < audio.duration - 5) audio.currentTime = startSec;
+        }, { once: true });
+      }
       P.index = i;
       doneMarked = false;
       P.loading = false;
@@ -134,6 +142,7 @@ async function loadIndex(i, autoplay) {
 
 // 範囲を決めて再生を始める
 export async function start(scope, startId) {
+  P.single = false;
   P.scope = scope;
   writePref("fp3-listen-scope", scope);
   let list = tracksFor(scope);
@@ -150,6 +159,27 @@ export async function start(scope, startId) {
     return;
   }
   await loadIndex(i, true);
+}
+
+// 教材ページから、その教材の音声だけを流す（画面を切り替えても流れ続ける）
+export async function playOne(mid) {
+  if (currentId() === mid && audio.src) {
+    if (audio.paused) audio.play().catch(() => {});
+    return;
+  }
+  P.single = true;
+  P.queue = [mid];
+  await loadIndex(0, true, Number(D.getProgress(mid, "audio").position_sec || 0));
+}
+
+// 止めて、下の小さなプレイヤーも消す
+export function stop() {
+  audio.pause();
+  P.single = false;
+  P.queue = [];
+  P.index = -1;
+  P.error = "";
+  notify();
 }
 
 export function playAt(i) {
@@ -254,7 +284,7 @@ setInterval(checkSleep, 1000);
 let playStart = null;
 function stopTimer() {
   if (playStart == null) return;
-  D.addStudy(Math.min((Date.now() - playStart) / 1000, 3 * 3600), "listen");
+  D.addStudy(Math.min((Date.now() - playStart) / 1000, 3 * 3600), P.single ? "audio" : "listen");
   playStart = null;
 }
 
@@ -265,8 +295,19 @@ audio.addEventListener("play", () => {
   updateMediaSession();
   notify();
 });
+// 聞いた位置を覚えておく（教材ページで続きから再生するため）
+let lastPosSave = 0;
+function savePosition(force) {
+  const mid = currentId();
+  if (!mid || !audio.duration) return;
+  const now = Date.now();
+  if (!force && now - lastPosSave < 10000) return;
+  lastPosSave = now;
+  D.setProgress(mid, "audio", { position_sec: audio.currentTime }, { silent: true });
+}
 audio.addEventListener("pause", () => {
   stopTimer();
+  if (!audio.ended) savePosition(true);
   notify();
 });
 audio.addEventListener("ratechange", () => {
@@ -279,12 +320,22 @@ audio.addEventListener("timeupdate", () => {
     doneMarked = true;
     if (!D.getProgress(mid, "audio").done) D.setProgress(mid, "audio", { done: true });
   }
+  savePosition(false);
   notify("tick");
 });
 audio.addEventListener("ended", () => {
   stopTimer();
   const mid = currentId();
-  if (mid && !D.getProgress(mid, "audio").done) D.setProgress(mid, "audio", { done: true });
+  if (mid) D.setProgress(mid, "audio", { done: true, position_sec: 0 });
+  if (P.single) {
+    // 教材ページから流した音声は、終わったらそこでおしまい（下の小さなプレイヤーも消す）
+    P.single = false;
+    P.queue = [];
+    P.index = -1;
+    if (P.sleepEnd) { P.sleepEnd = false; P.sleepChoice = ""; }
+    notify();
+    return;
+  }
   if (P.sleepEnd) {
     P.sleepEnd = false;
     P.sleepChoice = "";
@@ -294,7 +345,7 @@ audio.addEventListener("ended", () => {
   next();
 });
 audio.addEventListener("error", () => {
-  P.error = "この音声を再生できませんでした。次の音声に進みます。";
+  P.error = P.single ? "この音声を再生できませんでした。" : "この音声を再生できませんでした。次の音声に進みます。";
   notify();
   setTimeout(() => next(), 1500);
 });
@@ -307,7 +358,7 @@ function updateMediaSession() {
   if (!("mediaSession" in navigator)) return;
   const mid = currentId();
   const m = mid && D.state.materials.find((x) => x.id === mid);
-  if (m) navigator.mediaSession.metadata = new MediaMetadata({ title: m.title, artist: "FP3級 学習ノート（聞き流し）" });
+  if (m) navigator.mediaSession.metadata = new MediaMetadata({ title: m.title, artist: P.single ? "FP3級 学習ノート" : "FP3級 学習ノート（聞き流し）" });
   const set = (action, fn) => {
     try {
       navigator.mediaSession.setActionHandler(action, fn);
