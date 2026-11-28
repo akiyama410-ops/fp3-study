@@ -464,7 +464,75 @@ async function mediaSource(m, kind) {
   }
 }
 
+// 教材の音声：画面をまたいで動くプレイヤー（聞き流しと同じもの）で流すので、タブや画面を切り替えても止まらない
+async function audioPanel(panel, m) {
+  const P = PL.P;
+  const mid = m.id;
+  panel.innerHTML = `
+    <div class="tp">
+      <button class="btn primary tp-play" id="tp-play"></button>
+      <div class="tp-seek"><input type="range" id="tp-seek" min="0" max="1000" value="0" aria-label="再生位置"><span class="tp-time" id="tp-time"></span></div>
+      <p class="note" id="tp-msg" role="status"></p>
+    </div>
+    <div class="player-ctrl">
+      <button class="btn" data-seek="-15">↺ 15秒</button>
+      <label class="speed-sel">速さ<select data-speed aria-label="再生速度">${PL.speedOptions(P.speed)}</select></label>
+      <button class="btn" data-seek="15">15秒 ↻</button>
+    </div>
+    <p class="note">再生中にタブやほかの画面に移っても、音声は流れ続けます（画面の下の小さなプレイヤーで止められます）。</p>`;
+  panel.appendChild(doneButton(mid, "audio", "聞いた", "聞いたらチェック"));
+  await storageLine(panel, m, "audio", null);
+  const playBtn = panel.querySelector("#tp-play");
+  const seekEl = panel.querySelector("#tp-seek");
+  const timeEl = panel.querySelector("#tp-time");
+  const msgEl = panel.querySelector("#tp-msg");
+  const speedEl = panel.querySelector("[data-speed]");
+  const mine = () => PL.currentId() === mid && P.single;
+  let seeking = false;
+  const tick = () => {
+    const a = P.audio;
+    if (mine() && a.duration) {
+      if (!seeking) seekEl.value = Math.round((a.currentTime / a.duration) * 1000);
+      timeEl.textContent = `${fmtTime(a.currentTime)} / ${fmtTime(a.duration)}`;
+      seekEl.disabled = false;
+    } else {
+      const pos = Number(D.getProgress(mid, "audio").position_sec || 0);
+      seekEl.value = 0;
+      seekEl.disabled = true;
+      timeEl.textContent = pos > 5 ? `前回の続き ${fmtTime(pos)} から` : "";
+    }
+  };
+  const draw = () => {
+    const playing = mine() && PL.isPlaying();
+    playBtn.textContent = P.loading && mine() ? "読み込み中…" : playing ? "⏸ 一時停止" : "▶ 再生";
+    msgEl.textContent = mine() && P.error ? P.error : "";
+    if (Number(speedEl.value) !== P.speed) speedEl.value = String(P.speed);
+    tick();
+  };
+  playBtn.addEventListener("click", () => {
+    if (mine() && PL.isPlaying()) P.audio.pause();
+    else PL.playOne(mid);
+  });
+  seekEl.addEventListener("input", () => {
+    seeking = true;
+    if (P.audio.duration) timeEl.textContent = `${fmtTime((seekEl.value / 1000) * P.audio.duration)} / ${fmtTime(P.audio.duration)}`;
+  });
+  seekEl.addEventListener("change", () => {
+    seeking = false;
+    if (mine() && P.audio.duration) PL.seek((seekEl.value / 1000) * P.audio.duration);
+  });
+  panel.querySelector(".player-ctrl").addEventListener("click", (e) => {
+    const sec = e.target.dataset && e.target.dataset.seek;
+    if (sec && mine()) PL.skip(Number(sec));
+  });
+  speedEl.addEventListener("change", () => PL.setSpeed(speedEl.value));
+  const off = PL.onPlayer((kind) => (kind === "tick" ? tick() : draw()));
+  draw();
+  return () => off();
+}
+
 async function mediaPanel(panel, m, kind, ctx) {
+  if (kind === "audio") return audioPanel(panel, m);
   const src = await mediaSource(m, kind);
   if (!ctx.alive()) {
     if (src && src.revoke) URL.revokeObjectURL(src.url);
@@ -1686,7 +1754,7 @@ async function listenView(ctx) {
     const pm = playingId && state.materials.find((x) => x.id === playingId);
     const scopeTracks = PL.tracksFor(scope);
     const queue = P.queue.length ? P.queue : scopeTracks;
-    const showingCurrent = P.queue.length && P.scope === scope;
+    const showingCurrent = P.queue.length && !P.single && P.scope === scope;
     const list = showingCurrent ? P.queue : scopeTracks;
     view.innerHTML = `
       <section class="card">
@@ -1810,7 +1878,7 @@ async function listenView(ctx) {
     if (vol) vol.addEventListener("input", () => PL.setVolume(vol.value / 100));
     view.querySelectorAll(".track").forEach((b) =>
       b.addEventListener("click", () => {
-        if (P.queue.length && P.scope === scope) PL.playAt(Number(b.dataset.i));
+        if (P.queue.length && !P.single && P.scope === scope) PL.playAt(Number(b.dataset.i));
         else PL.start(scope, b.dataset.id);
       }),
     );
@@ -1839,8 +1907,10 @@ async function listenView(ctx) {
 const mini = document.getElementById("mini");
 function updateMini() {
   const id = PL.currentId();
-  const onListen = parseRoute()[0] === "listen";
-  if (!id || !state.user || onListen) {
+  const route = parseRoute();
+  const onListen = route[0] === "listen";
+  const onOwnAudio = PL.P.single && route[0] === "m" && route[1] === id && (route[2] || "audio") === "audio";
+  if (!id || !state.user || onListen || onOwnAudio) {
     mini.hidden = true;
     document.body.classList.remove("has-mini");
     return;
@@ -1848,14 +1918,16 @@ function updateMini() {
   const m = state.materials.find((x) => x.id === id);
   mini.hidden = false;
   document.body.classList.add("has-mini");
-  mini.innerHTML = `<a href="#/listen" class="mini-title">🎧 ${esc(m ? m.title : "")}</a>
+  const single = PL.P.single;
+  mini.innerHTML = `<a href="${single ? `#/m/${encodeURIComponent(id)}/audio` : "#/listen"}" class="mini-title">🎧 ${esc(m ? m.title : "")}</a>
     <button class="icon" data-mini="play" aria-label="再生・一時停止">${PL.isPlaying() ? "⏸" : "▶"}</button>
-    <button class="icon" data-mini="next" aria-label="次の音声">⏭</button>`;
+    ${single ? `<button class="icon" data-mini="stop" aria-label="停止して閉じる">✕</button>` : `<button class="icon" data-mini="next" aria-label="次の音声">⏭</button>`}`;
 }
 mini.addEventListener("click", (e) => {
   const act = e.target.closest("[data-mini]");
   if (!act) return;
   if (act.dataset.mini === "play") PL.toggle();
+  else if (act.dataset.mini === "stop") PL.stop();
   else PL.next();
 });
 PL.onPlayer((kind) => {
