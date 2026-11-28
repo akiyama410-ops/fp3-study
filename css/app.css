@@ -147,7 +147,25 @@ video.video { width: 100%; border-radius: 10px; background: #000; }
 .done-toggle { width: 100%; margin: 6px 0; }
 .done-toggle.is-done { color: var(--ok); border-color: var(--ok); }
 .save-line { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; font-size: 0.85rem; color: var(--muted); }
-.slides canvas, .slides img { display: block; width: 100%; margin-top: 10px; border-radius: 8px; border: 1px solid var(--line); }
+.slides canvas, .slides img { display: block; width: 100%; margin-top: 10px; border-radius: 8px; border: 1px solid var(--line); cursor: zoom-in; }
+.fs-open { margin-top: 10px; }
+body.no-scroll { overflow: hidden; }
+.slide-viewer {
+  position: fixed; inset: 0; z-index: 50; background: #000; color: #fff; display: flex; flex-direction: column;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+.sv-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px; font-size: 0.9rem; }
+.sv-close { background: rgba(255, 255, 255, 0.15); color: #fff; border: 0; border-radius: 999px; padding: 8px 14px; font: inherit; cursor: pointer; }
+.sv-stage { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; touch-action: pan-y pinch-zoom; user-select: none; -webkit-user-select: none; }
+.sv-stage canvas, .sv-stage img { display: block; max-width: 100%; max-height: 100%; object-fit: contain; background: #fff; }
+.sv-nav {
+  position: absolute; top: 50%; transform: translateY(-50%); width: 44px; height: 64px; border: 0; border-radius: 10px;
+  background: rgba(0, 0, 0, 0.45); color: #fff; font-size: 2rem; line-height: 1; cursor: pointer;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.25);
+}
+.sv-prev { left: calc(6px + env(safe-area-inset-left)); }
+.sv-next { right: calc(6px + env(safe-area-inset-right)); }
+.sv-nav:disabled { visibility: hidden; }
 
 .doc { font-size: 0.95rem; overflow-wrap: anywhere; }
 .doc h2 { margin-top: 1.4em; padding-bottom: 4px; border-bottom: 2px solid var(--line); }
